@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **LUNCH WARS** (`code-can`) — a real-time, multiplayer voting battle rendered on a single HTML canvas. Many anonymous users vote for / attack lunch menus; every menu is a "planet with a face" and the shared battlefield animates votes, combat, and a Patapon-style marching army to a beat. Vanilla TypeScript + Vite, almost no dependencies (only `@supabase/supabase-js`). Backend is Supabase (Postgres + Realtime); there is also a fully self-contained in-memory demo mode.
 
-> Note: `README.md` is partly stale — it describes an earlier "programming-language war" theme, GitHub Pages hosting, and a `/vote` Edge Function. The live app is themed as food menus, deploys on **Vercel**, and votes go through SECURITY DEFINER RPCs called directly from the client (no Edge Function in the live path). Trust the code over the README.
+The app deploys on **Vercel**, and all writes go through SECURITY DEFINER RPCs called directly from the client — there is no server / Edge Function in the live path.
 
 ## Commands
 
@@ -21,7 +21,7 @@ npm run preview   # serve the production build
 
 ## Deployment
 
-Pushing to `main` triggers a **Vercel** production deploy via its GitHub integration (no config file in-repo; settings live in the Vercel dashboard, including the `VITE_SUPABASE_*` env vars). A GitHub Pages workflow (`.github/workflows/deploy.yml`) also exists but Vercel is the active host. The frontend deploy and the database are independent — schema changes must be applied to Supabase separately (see SQL below).
+Pushing to `main` triggers a **Vercel** production deploy via its GitHub integration (no config file in-repo; settings live in the Vercel dashboard, including the `VITE_SUPABASE_*` env vars). The frontend deploy and the database are independent — schema changes must be applied to Supabase separately (see SQL below).
 
 ## Architecture
 
@@ -59,7 +59,6 @@ Input: hold/click your champion planet to vote, any rival to attack; `combo` ram
 
 - **`supabase/deploy.sql` is the canonical one-shot setup** — paste the whole file into the Supabase SQL editor and Run. It is idempotent and safe to re-run. When you change schema/RPCs, mirror the change into `deploy.sql`.
 - `supabase/migrations/000N_*.sql` are incremental migrations (`db push` order). The latest define daily rounds (`0008`) and chat persistence (`0009`).
-- **`supabase/setup.sql` is an outdated older script** (no daily rounds, old language theme) — do not extend it; use `deploy.sql`.
 
 Security model: anon clients can only **read** tables (RLS). All writes go through `SECURITY DEFINER` RPCs — `cast_vote`, `attack_language`, `post_message`, `roll_round_if_due` — so the anon key can't tamper with totals directly.
 
