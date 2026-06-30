@@ -22,7 +22,6 @@ interface LanguageRow {
   total_votes: number
 }
 
-const ATTACK_DAMAGE = 3
 
 /** Real backend: Postgres for totals, Realtime for the shared battlefield,
  * a SECURITY DEFINER RPC for validated voting/combat, and an ephemeral
@@ -59,8 +58,10 @@ export class SupabaseBackend implements Backend {
         (payload) => {
           const next = payload.new as LanguageRow
           const prev = payload.old as Partial<LanguageRow>
-          const total = next.total_votes
-          const before = typeof prev.total_votes === 'number' ? prev.total_votes : total - 1
+          // numeric/bigint can arrive as a string — coerce to a number.
+          const total = Number(next.total_votes)
+          const before =
+            prev.total_votes != null ? Number(prev.total_votes) : total - 10
           // A drop means the row was attacked; a rise is a normal vote.
           const kind = total < before ? 'attack' : 'vote'
           const amount = Math.max(1, Math.abs(total - before))
@@ -87,34 +88,35 @@ export class SupabaseBackend implements Backend {
       }
       return { ok: false, error: error.message ?? 'vote failed' }
     }
-    return { ok: true, total: data as number }
+    return { ok: true, total: Number(data) }
   }
 
   async attack(
     target: string,
     champion: string,
     _turnstileToken: string | null,
+    amount = 1,
   ): Promise<VoteResult> {
-    // `attack_language` (SECURITY DEFINER) decrements the target's votes,
-    // clamped at 0, and rate-limits per IP server-side.
-    const { data, error } = await this.client.rpc('attack_language', { p_target: target })
+    // `attack_language` (SECURITY DEFINER) removes `amount` tenths from the
+    // target, clamped at 0. No rate limit — attacking is unlimited.
+    const { data, error } = await this.client.rpc('attack_language', {
+      p_target: target,
+      p_amount: amount,
+    })
     if (error) {
-      if (error.message?.includes('rate_limited')) {
-        return { ok: false, error: 'too many attacks, slow down', retryAfter: 15 }
-      }
-      if (error.message?.includes('unknown language')) {
-        return { ok: false, error: 'unknown language' }
+      if (error.message?.includes('unknown menu')) {
+        return { ok: false, error: 'unknown menu' }
       }
       return { ok: false, error: error.message ?? 'attack failed' }
     }
-    // Broadcast the assault so other clients animate the charge (the vote total
-    // itself propagates authoritatively via postgres_changes).
+    // Broadcast the (batched) assault so other clients animate the strike; the
+    // vote total itself propagates authoritatively via postgres_changes.
     this.joinArena().send({
       type: 'broadcast',
       event: 'assault',
-      payload: { champion, target, amount: ATTACK_DAMAGE },
+      payload: { champion, target, amount },
     })
-    return { ok: true, total: data as number }
+    return { ok: true, total: Number(data) }
   }
 
   subscribeArena(handlers: ArenaHandlers): () => void {

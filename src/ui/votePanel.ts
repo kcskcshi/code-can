@@ -1,20 +1,22 @@
 import type { Backend } from '../types'
 import type { Store } from '../store'
 import { el, rafThrottle } from './dom'
+import { fmtVotes } from './format'
 import { Turnstile } from './turnstile'
 
 const COOLDOWN_MS = 1500
+const VOTE_GAIN = 10 // a vote is +1.0 (10 tenths)
 
 /** The voting booth: search box, a button per language, Turnstile, status line. */
 export function mountVotePanel(root: HTMLElement, store: Store, backend: Backend): void {
   const turnstile = new Turnstile()
-  const status = el('p', { class: 'vote-status', text: '내 언어에 한 표를 던지세요 ⚔' })
+  const status = el('p', { class: 'vote-status', text: '오늘 점심 메뉴에 한 표! 🍽' })
   const tsBox = el('div', { class: 'turnstile-box' })
   const search = el('input', {
     class: 'vote-search',
     type: 'search',
-    placeholder: '언어 검색…',
-    'aria-label': '언어 검색',
+    placeholder: '메뉴 검색…',
+    'aria-label': '메뉴 검색',
   }) as HTMLInputElement
   const grid = el('div', { class: 'vote-grid' })
 
@@ -52,9 +54,9 @@ export function mountVotePanel(root: HTMLElement, store: Store, backend: Backend
     turnstile.consume()
 
     if (res.ok) {
-      store.applyVote({ slug, total: res.total, amount: 1 }, true)
+      store.applyVote({ slug, total: res.total, amount: VOTE_GAIN, kind: 'vote' }, true)
       const name = store.get(slug)?.name ?? slug
-      setStatus(`${name}에 투표 완료! ⚔ (총 ${res.total.toLocaleString()}표)`, 'ok')
+      setStatus(`${name}에 투표 완료! 🍽 (총 ${fmtVotes(res.total)}표)`, 'ok')
     } else {
       cooldownUntil = res.retryAfter ? now + res.retryAfter * 1000 : cooldownUntil
       setStatus(

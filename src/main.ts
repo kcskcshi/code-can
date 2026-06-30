@@ -29,12 +29,12 @@ async function boot() {
   app.append(
     el('header', { class: 'site-header' }, [
       el('div', { class: 'brand' }, [
-        el('h1', { class: 'logo', text: 'code-can' }),
+        el('h1', { class: 'logo', text: 'LUNCH WARS' }),
         modeBadge,
       ]),
       el('p', {
         class: 'tagline',
-        text: '내 언어에 투표해 군대를 키우고, 전장에서 적 진영을 클릭해 박살내라. ⚔',
+        text: '오늘 점심 뭐 먹지? 메뉴에 투표해 행성을 키우고, 라이벌 행성을 꾹 눌러 부숴라 🍱⚔',
       }),
     ]),
     battleWrap,
@@ -42,7 +42,7 @@ async function boot() {
     el('main', { class: 'grid' }, [colVote, colStand, colFeed, colChat]),
     el('footer', { class: 'site-footer' }, [
       el('p', {
-        text: '스페인 길거리에서 여행자들이 "가장 위대한 언어"를 묻는 깡통 투표로 여비를 벌던 일화에서 출발했습니다.',
+        text: '스페인 길거리에서 여행자들이 "가장 위대한 점심 메뉴"를 묻는 깡통 투표로 여비를 벌던 일화에서 출발했습니다.',
       }),
     ]),
   )
@@ -82,8 +82,8 @@ async function boot() {
   mountChatPanel(colChat, store, backend)
 
   const battle = new BattleField(canvas, store)
-  // click an enemy army on the field → attack it
-  battle.onAttackTarget((slug) => combat.tryAttack(slug))
+  // press-and-hold an enemy planet on the field → auto-fire attacks
+  battle.onAttackTarget((slug) => combat.onAttack(slug))
   battle.start()
 }
 

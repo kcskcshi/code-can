@@ -1,61 +1,21 @@
 -- ============================================================================
--- LUNCH WARS (code-can) — complete one-shot setup for the Supabase SQL Editor.
--- Dashboard -> SQL Editor -> New query -> paste this whole file -> Run.
+-- code-can → "LUNCH WARS": re-theme to lunch menus, switch votes to TENTHS,
+-- and make attacking unlimited.
 --
--- Everything the deployed app needs: schema + RLS + realtime + lunch-menu seed
--- + the `cast_vote` RPC and the unlimited `attack_language` combat RPC the
--- frontend calls directly. No Edge Function required. (Live chat needs no SQL —
--- it rides Realtime broadcast.)
+-- Paste into the Supabase SQL Editor and Run. THIS WIPES the current contenders
+-- and re-seeds with food (the programming-language data is replaced).
 --
--- Votes are stored in TENTHS: a vote is +10 (=1.0), an attack is −1 (=0.1).
--- Safe to re-run; idempotent. (To re-theme an existing DB, run
--- migrations/0005_food_theme.sql instead — it wipes the old contenders first.)
+--  * total_votes now counts TENTHS: a vote is +10 (=1.0), an attack is −1 (=0.1).
+--  * attack_language takes p_amount (tenths) and has NO rate limit.
+--  * attack_log is gone (no rate limiting → not needed).
 -- ============================================================================
 
--- ---- schema -----------------------------------------------------------------
-create table if not exists public.languages (
-  slug        text primary key,
-  name        text not null,
-  tag         text not null,
-  color       text not null,
-  total_votes bigint not null default 0,
-  created_at  timestamptz not null default now()
-);
+-- combat no longer rate-limits, so the log table is unnecessary
+drop table if exists public.attack_log;
 
-create table if not exists public.vote_log (
-  id            bigint generated always as identity primary key,
-  language_slug text not null references public.languages(slug),
-  ip_hash       text not null,
-  created_at    timestamptz not null default now()
-);
+-- wipe old contenders + vote history, then reseed with menus
+truncate public.languages, public.vote_log restart identity cascade;
 
-create index if not exists vote_log_ip_time_idx on public.vote_log (ip_hash, created_at desc);
-create index if not exists vote_log_time_idx    on public.vote_log (created_at desc);
-
--- ---- RLS: clients may only READ languages -----------------------------------
-alter table public.languages enable row level security;
-alter table public.vote_log  enable row level security;
-
-drop policy if exists "languages readable by anyone" on public.languages;
-create policy "languages readable by anyone"
-  on public.languages for select
-  using (true);
-
--- ---- realtime: ship full old+new rows on UPDATE -----------------------------
-alter table public.languages replica identity full;
-do $$
-begin
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'languages'
-  ) then
-    alter publication supabase_realtime add table public.languages;
-  end if;
-end $$;
-
--- ---- seed (lunch menus; total_votes in tenths) ------------------------------
 insert into public.languages (slug, name, tag, color, total_votes) values
   ('kimchi-stew','김치찌개','김치','#e2503f',520),
   ('jjajang','짜장면','짜장','#3b2a22',480),
@@ -87,9 +47,7 @@ insert into public.languages (slug, name, tag, color, total_votes) values
   ('jeyuk','제육덮밥','제육','#cf4633',420)
 on conflict (slug) do nothing;
 
--- ---- anon-callable voting with in-database rate limiting --------------------
--- SECURITY DEFINER so it can write despite RLS; the client IP is read from the
--- gateway-supplied request headers server-side (never trusted from the client).
+-- ---- voting: now +10 (=1.0) per vote (keeps the per-IP rate limit) ----------
 create or replace function public.cast_vote(p_slug text)
 returns bigint
 language plpgsql
@@ -97,9 +55,9 @@ security definer
 set search_path = public
 as $$
 declare
-  v_ip     text;
-  v_hash   text;
-  v_recent int;
+  v_ip      text;
+  v_hash    text;
+  v_recent  int;
   new_total bigint;
 begin
   v_ip := split_part(
@@ -134,8 +92,7 @@ $$;
 
 grant execute on function public.cast_vote(text) to anon, authenticated;
 
--- ---- combat: UNLIMITED attack that removes p_amount tenths (default 1=0.1) ---
--- No rate limit (attacking is meant to be spammed), so no attack_log needed.
+-- ---- combat: unlimited; removes p_amount tenths (default 1 = 0.1) -----------
 drop function if exists public.attack_language(text);
 create or replace function public.attack_language(p_target text, p_amount int default 1)
 returns bigint

@@ -1,43 +1,42 @@
 import type { Language } from './types'
 
 /**
- * Curated catalog of contenders. This is the single source of truth for the
- * frontend (demo mode + sprite colors). The DB seed in
- * supabase/migrations/0001_init.sql mirrors this list — keep them in sync.
+ * Curated catalog of lunch-menu contenders. Single source of truth for the
+ * frontend (demo mode + planet colors/emoji). The DB seed in
+ * supabase/migrations/0005_food_theme.sql mirrors this list — keep them in sync.
  *
- * `votes` here are only used as the starting point for DEMO mode.
+ * The export names stay `LANGUAGES`/`LANGUAGE_BY_SLUG` for historical reasons;
+ * they now hold menu items. `votes` here only seeds DEMO mode (in tenths).
  */
 export const LANGUAGES: Omit<Language, 'votes'>[] = [
-  { slug: 'javascript', name: 'JavaScript', tag: 'JS', color: '#f7df1e' },
-  { slug: 'typescript', name: 'TypeScript', tag: 'TS', color: '#3178c6' },
-  { slug: 'python', name: 'Python', tag: 'PY', color: '#4b8bbe' },
-  { slug: 'rust', name: 'Rust', tag: 'RS', color: '#ce422b' },
-  { slug: 'go', name: 'Go', tag: 'GO', color: '#00add8' },
-  { slug: 'java', name: 'Java', tag: 'JAV', color: '#e76f00' },
-  { slug: 'c', name: 'C', tag: 'C', color: '#5c6bc0' },
-  { slug: 'cpp', name: 'C++', tag: 'C++', color: '#00599c' },
-  { slug: 'csharp', name: 'C#', tag: 'C#', color: '#9b4f96' },
-  { slug: 'ruby', name: 'Ruby', tag: 'RB', color: '#cc342d' },
-  { slug: 'php', name: 'PHP', tag: 'PHP', color: '#777bb4' },
-  { slug: 'swift', name: 'Swift', tag: 'SW', color: '#fa7343' },
-  { slug: 'kotlin', name: 'Kotlin', tag: 'KT', color: '#7f52ff' },
-  { slug: 'dart', name: 'Dart', tag: 'DRT', color: '#0175c2' },
-  { slug: 'scala', name: 'Scala', tag: 'SC', color: '#dc322f' },
-  { slug: 'haskell', name: 'Haskell', tag: 'HS', color: '#5e5086' },
-  { slug: 'elixir', name: 'Elixir', tag: 'EX', color: '#6e4a7e' },
-  { slug: 'clojure', name: 'Clojure', tag: 'CLJ', color: '#5881d8' },
-  { slug: 'lua', name: 'Lua', tag: 'LUA', color: '#000080' },
-  { slug: 'perl', name: 'Perl', tag: 'PL', color: '#39457e' },
-  { slug: 'r', name: 'R', tag: 'R', color: '#276dc3' },
-  { slug: 'julia', name: 'Julia', tag: 'JL', color: '#9558b2' },
-  { slug: 'zig', name: 'Zig', tag: 'ZIG', color: '#f7a41d' },
-  { slug: 'elm', name: 'Elm', tag: 'ELM', color: '#60b5cc' },
-  { slug: 'ocaml', name: 'OCaml', tag: 'ML', color: '#ec670f' },
-  { slug: 'erlang', name: 'Erlang', tag: 'ERL', color: '#a90533' },
-  { slug: 'fsharp', name: 'F#', tag: 'F#', color: '#378bba' },
-  { slug: 'bash', name: 'Bash', tag: 'SH', color: '#89e051' },
-  { slug: 'sql', name: 'SQL', tag: 'SQL', color: '#e38c00' },
-  { slug: 'cobol', name: 'COBOL', tag: 'CBL', color: '#1f6f8b' },
+  { slug: 'kimchi-stew', name: '김치찌개', tag: '김치', color: '#e2503f', emoji: '🍲' },
+  { slug: 'jjajang', name: '짜장면', tag: '짜장', color: '#3b2a22', emoji: '🍜' },
+  { slug: 'sushi', name: '초밥', tag: '초밥', color: '#f7a6b4', emoji: '🍣' },
+  { slug: 'pizza', name: '피자', tag: '피자', color: '#e8893b', emoji: '🍕' },
+  { slug: 'burger', name: '햄버거', tag: '버거', color: '#a9682f', emoji: '🍔' },
+  { slug: 'bibimbap', name: '비빔밥', tag: '비빔', color: '#d8482e', emoji: '🍚' },
+  { slug: 'ramen', name: '라면', tag: '라면', color: '#d23b2c', emoji: '🍜' },
+  { slug: 'tteokbokki', name: '떡볶이', tag: '떡볶', color: '#e84a4a', emoji: '🌶' },
+  { slug: 'pasta', name: '파스타', tag: '파스타', color: '#e0b14a', emoji: '🍝' },
+  { slug: 'pho', name: '쌀국수', tag: '쌀국', color: '#cb9a5c', emoji: '🍲' },
+  { slug: 'katsu', name: '돈까스', tag: '돈까', color: '#c98a4a', emoji: '🍖' },
+  { slug: 'chicken', name: '치킨', tag: '치킨', color: '#d98b2b', emoji: '🍗' },
+  { slug: 'curry', name: '카레', tag: '카레', color: '#d99a1f', emoji: '🍛' },
+  { slug: 'taco', name: '타코', tag: '타코', color: '#e0a83c', emoji: '🌮' },
+  { slug: 'dumpling', name: '만두', tag: '만두', color: '#e8d8a8', emoji: '🥟' },
+  { slug: 'udon', name: '우동', tag: '우동', color: '#cdb98a', emoji: '🍜' },
+  { slug: 'malatang', name: '마라탕', tag: '마라', color: '#b8323c', emoji: '🥘' },
+  { slug: 'burrito', name: '부리토', tag: '부리', color: '#b9893f', emoji: '🌯' },
+  { slug: 'sandwich', name: '샌드위치', tag: '샌드', color: '#d8b86a', emoji: '🥪' },
+  { slug: 'naengmyeon', name: '냉면', tag: '냉면', color: '#5c8aa8', emoji: '🍜' },
+  { slug: 'gyudon', name: '규동', tag: '규동', color: '#b0743a', emoji: '🍱' },
+  { slug: 'padthai', name: '팟타이', tag: '팟타', color: '#dd8f4a', emoji: '🍤' },
+  { slug: 'fries', name: '감자튀김', tag: '감튀', color: '#e8c44a', emoji: '🍟' },
+  { slug: 'salad', name: '샐러드', tag: '샐러', color: '#6db84a', emoji: '🥗' },
+  { slug: 'gimbap', name: '김밥', tag: '김밥', color: '#3f8f5c', emoji: '🍙' },
+  { slug: 'steak', name: '스테이크', tag: '스테', color: '#8a3f33', emoji: '🥩' },
+  { slug: 'sundubu', name: '순두부', tag: '순두', color: '#e26a4a', emoji: '🍲' },
+  { slug: 'jeyuk', name: '제육덮밥', tag: '제육', color: '#cf4633', emoji: '🍚' },
 ]
 
 export const LANGUAGE_BY_SLUG: Record<string, Omit<Language, 'votes'>> =

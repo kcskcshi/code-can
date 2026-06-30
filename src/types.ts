@@ -1,22 +1,27 @@
 export interface Language {
-  /** stable slug, also the primary key in the DB (e.g. "javascript") */
+  /** stable slug, also the primary key in the DB (e.g. "kimchi-stew") */
   slug: string
-  /** display name (e.g. "JavaScript") */
+  /** display name (e.g. "김치찌개") */
   name: string
-  /** short tag drawn on the pixel soldiers (e.g. "JS") */
+  /** short label drawn on the planet (e.g. "김치") */
   tag: string
-  /** brand-ish hex color used to tint the army */
+  /** food-ish hex color used to tint the planet */
   color: string
-  /** current cumulative vote total */
+  /** cute emoji shown on the planet */
+  emoji?: string
+  /**
+   * Current cumulative total in TENTHS of a vote (a vote is +10, an attack is
+   * −1). Display divides by 10. Keeping it integer avoids float drift.
+   */
   votes: number
 }
 
 /** A single vote event broadcast to every connected client to drive battle FX. */
 export interface VoteEvent {
   slug: string
-  /** new cumulative total after this event (authoritative) */
+  /** new cumulative total (TENTHS) after this event (authoritative) */
   total: number
-  /** how many votes this event represents (usually 1) */
+  /** magnitude of this event in TENTHS (a vote is 10, one attack tick is 1) */
   amount: number
   /**
    * 'vote' increments the total; 'attack' decrements it (combat). Defaults to
@@ -39,14 +44,15 @@ export interface ChatMessage {
   ts: number
 }
 
-/** A combat assault: one army charges another. Drives the battlefield animation
- * only; the authoritative vote total is carried separately by VoteEvent. */
+/** A combat assault: one planet strikes another. Drives the battlefield
+ * animation only; the authoritative vote total is carried separately by
+ * VoteEvent. */
 export interface AssaultEvent {
-  /** attacker language slug (the charging army) */
+  /** attacker slug (the striking planet) */
   champion: string
-  /** defender language slug (loses votes) */
+  /** defender slug (loses votes) */
   target: string
-  /** how many votes were removed */
+  /** how many tenths were removed in this (possibly batched) strike */
   amount: number
 }
 
@@ -70,12 +76,14 @@ export interface Backend {
   subscribe(onVote: (e: VoteEvent) => void): () => void
   /** Cast a vote for a language. */
   vote(slug: string, turnstileToken: string | null): Promise<VoteResult>
-  /** Attack a rival language, removing a few of its votes. Returns the rival's
-   * new total. `champion` is the attacker's army (for the assault animation). */
+  /** Attack a rival, removing `amount` tenths of its votes (default 1 = 0.1).
+   * Returns the rival's new total. `champion` is the attacker (for the assault
+   * animation). `amount` lets the client batch rapid auto-fire into one call. */
   attack(
     target: string,
     champion: string,
     turnstileToken: string | null,
+    amount?: number,
   ): Promise<VoteResult>
   /** Subscribe to the ephemeral arena channel (chat + assault). */
   subscribeArena(handlers: ArenaHandlers): () => void

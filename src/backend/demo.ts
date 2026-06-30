@@ -8,7 +8,7 @@ import type {
 } from '../types'
 import { LANGUAGES } from '../languages'
 
-const ATTACK_DAMAGE = 3
+const VOTE_GAIN = 10 // a vote is +1.0 (10 tenths)
 
 /**
  * In-memory backend so the site is fully alive on GitHub Pages before a
@@ -24,10 +24,10 @@ export class DemoBackend implements Backend {
   private timer: ReturnType<typeof setInterval> | null = null
 
   async load(): Promise<Language[]> {
-    // Deterministic-ish seed so the leaderboard looks lived-in on first paint.
+    // Deterministic-ish seed (in tenths) so the diner looks lived-in on first paint.
     this.langs = LANGUAGES.map((l, i) => ({
       ...l,
-      votes: Math.round(2000 / (i + 1) + 40 * ((i * 37) % 11)),
+      votes: Math.round(2000 / (i + 1) + 40 * ((i * 37) % 11)) * 10,
     }))
     this.startSimulation()
     return this.snapshot()
@@ -40,17 +40,17 @@ export class DemoBackend implements Backend {
 
   async vote(slug: string): Promise<VoteResult> {
     const lang = this.langs.find((l) => l.slug === slug)
-    if (!lang) return { ok: false, error: 'unknown language' }
-    lang.votes += 1
-    this.emit({ slug, total: lang.votes, amount: 1, kind: 'vote' })
+    if (!lang) return { ok: false, error: 'unknown menu' }
+    lang.votes += VOTE_GAIN
+    this.emit({ slug, total: lang.votes, amount: VOTE_GAIN, kind: 'vote' })
     return { ok: true, total: lang.votes }
   }
 
-  async attack(target: string, champion: string): Promise<VoteResult> {
+  async attack(target: string, champion: string, _token: string | null, amount = 1): Promise<VoteResult> {
     const lang = this.langs.find((l) => l.slug === target)
-    if (!lang) return { ok: false, error: 'unknown language' }
-    const removed = Math.min(ATTACK_DAMAGE, lang.votes)
-    lang.votes = Math.max(0, lang.votes - ATTACK_DAMAGE)
+    if (!lang) return { ok: false, error: 'unknown menu' }
+    const removed = Math.min(amount, lang.votes)
+    lang.votes = Math.max(0, lang.votes - amount)
     this.emit({ slug: target, total: lang.votes, amount: removed, kind: 'attack' })
     for (const h of this.arena) h.onAssault({ champion, target, amount: removed })
     return { ok: true, total: lang.votes }
@@ -80,7 +80,7 @@ export class DemoBackend implements Backend {
     let tick = 0
     this.timer = setInterval(() => {
       tick++
-      const weights = this.langs.map((l, i) => 1 + l.votes / 400 + (i < 6 ? 2 : 0))
+      const weights = this.langs.map((l, i) => 1 + l.votes / 4000 + (i < 6 ? 2 : 0))
       const total = weights.reduce((a, b) => a + b, 0)
       // pseudo-random without Math.random staying deterministic enough to feel organic
       let r = ((tick * 9301 + 49297) % 233280) / 233280 * total
@@ -93,8 +93,8 @@ export class DemoBackend implements Backend {
         }
       }
       const lang = this.langs[idx]
-      lang.votes += 1
-      this.emit({ slug: lang.slug, total: lang.votes, amount: 1, kind: 'vote' })
+      lang.votes += VOTE_GAIN
+      this.emit({ slug: lang.slug, total: lang.votes, amount: VOTE_GAIN, kind: 'vote' })
     }, 900)
   }
 }

@@ -1,5 +1,6 @@
 import type { Store } from '../store'
 import { el, rafThrottle } from './dom'
+import { fmtVotes } from './format'
 
 const SHOWN = 16
 
@@ -43,7 +44,7 @@ export function mountLeaderboard(root: HTMLElement, store: Store): void {
       }
       entry.rank.textContent = String(i + 1)
       entry.row.classList.toggle('is-leader', i === 0)
-      entry.votes.textContent = lang.votes.toLocaleString()
+      entry.votes.textContent = fmtVotes(lang.votes)
       entry.bar.style.width = `${Math.max(4, (lang.votes / leader) * 100)}%`
       // ensure DOM order matches rank
       if (list.children[i] !== entry.row) list.insertBefore(entry.row, list.children[i] ?? null)
