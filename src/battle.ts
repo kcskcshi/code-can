@@ -3,6 +3,7 @@ import type { Language } from './types'
 import { BATTLE_SQUADS } from './config'
 import { LANGUAGE_BY_SLUG } from './languages'
 import { fmtVotes, fmtDelta } from './ui/format'
+import { stats } from './stats'
 
 /** A cute little eater orbiting a menu planet (Walkr-ish ambient life). */
 interface Creature {
@@ -241,6 +242,7 @@ export class BattleField {
   private fireTick(slug: string) {
     this.combo += 1
     this.comboTimer = 0.8
+    stats.recordCombo(this.combo)
     const amount = comboDamage(this.combo)
     if (!this.reduceMotion && this.combo % 10 === 0) this.hitStop = 0.05
     if (slug === this.store.getChampion()) {

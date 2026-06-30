@@ -9,6 +9,11 @@ import { mountLeaderboard } from './ui/leaderboard'
 import { mountVotePanel } from './ui/votePanel'
 import { mountCombatHud } from './ui/combatPanel'
 import { mountChatPanel } from './ui/chatPanel'
+import { openStatsModal } from './ui/statsModal'
+import { openHallOfFameModal } from './ui/hallOfFameModal'
+import { shareCard } from './ui/share'
+import { showToast } from './ui/toast'
+import { stats } from './stats'
 import { el } from './ui/dom'
 
 async function boot() {
@@ -18,6 +23,9 @@ async function boot() {
   // --- layout ---------------------------------------------------------------
   const modeBadge = el('span', { class: 'mode-badge', text: '...' })
   const presenceBadge = el('span', { class: 'presence-badge', text: '🟢 …' })
+  const winnerChip = el('button', { class: 'chip', type: 'button', text: '👑 어제 우승: …' })
+  const statsChip = el('button', { class: 'chip', type: 'button', text: '🏅 내 기록' })
+  const shareChip = el('button', { class: 'chip', type: 'button', text: '📸 공유' })
   const canvas = el('canvas', { class: 'battle-canvas' })
   const battleWrap = el('section', { class: 'battlefield' }, [canvas])
   const hud = el('section', { class: 'hud-bar' })
@@ -36,6 +44,7 @@ async function boot() {
         class: 'tagline',
         text: '오늘 점심 뭐 먹지? 메뉴에 투표해 행성을 키우고, 라이벌 행성을 꾹 눌러 부숴라 🍱⚔',
       }),
+      el('div', { class: 'chip-row' }, [winnerChip, statsChip, shareChip]),
     ]),
     battleWrap,
     hud,
@@ -51,11 +60,13 @@ async function boot() {
   let backend: Backend
   try {
     backend = IS_LIVE ? new SupabaseBackend() : new DemoBackend()
+    await backend.rollRound() // archive yesterday's winner + reset if a new day
     const langs = await backend.load()
     store.init(langs)
   } catch (err) {
     console.warn('[code-can] live backend unavailable, falling back to demo:', err)
     backend = new DemoBackend()
+    await backend.rollRound()
     store.init(await backend.load())
   }
 
@@ -69,6 +80,18 @@ async function boot() {
   // live player count in the header
   backend.subscribePresence((n) => {
     presenceBadge.textContent = `🟢 ${n}명 전쟁 중`
+  })
+
+  // --- retention: stats, hall of fame, share --------------------------------
+  stats.markVisit()
+  stats.onUnlock((a) => showToast(`업적 해금! ${a.emoji} ${a.name}`))
+  statsChip.addEventListener('click', openStatsModal)
+  shareChip.addEventListener('click', () => void shareCard(store))
+
+  void backend.loadWinners().then((winners) => {
+    const top = winners[0]
+    winnerChip.textContent = top ? `👑 어제 우승: ${top.name}` : '👑 명예의 전당'
+    winnerChip.addEventListener('click', () => openHallOfFameModal(winners))
   })
 
   // stream remote votes/attacks into the store

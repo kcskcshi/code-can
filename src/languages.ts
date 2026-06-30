@@ -37,6 +37,27 @@ export const LANGUAGES: Omit<Language, 'votes'>[] = [
   { slug: 'steak', name: '스테이크', tag: '스테', color: '#8a3f33', emoji: '🥩' },
   { slug: 'sundubu', name: '순두부', tag: '순두', color: '#e26a4a', emoji: '🍲' },
   { slug: 'jeyuk', name: '제육덮밥', tag: '제육', color: '#cf4633', emoji: '🍚' },
+  // --- Korean office-worker staples -----------------------------------------
+  { slug: 'gukbap', name: '국밥', tag: '국밥', color: '#c2703a', emoji: '🍲' },
+  { slug: 'budae', name: '부대찌개', tag: '부대', color: '#d6473a', emoji: '🍲' },
+  { slug: 'jeyuk-bokkeum', name: '제육볶음', tag: '제볶', color: '#d84a2e', emoji: '🍳' },
+  { slug: 'kimchi-fried-rice', name: '김치볶음밥', tag: '김볶', color: '#e25b3f', emoji: '🍚' },
+  { slug: 'doenjang', name: '된장찌개', tag: '된장', color: '#b08a3f', emoji: '🥘' },
+  { slug: 'kalguksu', name: '칼국수', tag: '칼국', color: '#d8c79a', emoji: '🍜' },
+  { slug: 'sundae-gukbap', name: '순대국', tag: '순대', color: '#8a5a4a', emoji: '🍲' },
+  { slug: 'yukgaejang', name: '육개장', tag: '육개', color: '#c0392b', emoji: '🍲' },
+  { slug: 'galbitang', name: '갈비탕', tag: '갈비', color: '#c9a06a', emoji: '🍲' },
+  { slug: 'jjamppong', name: '짬뽕', tag: '짬뽕', color: '#d63a2c', emoji: '🍜' },
+  { slug: 'tangsuyuk', name: '탕수육', tag: '탕수', color: '#d98a3a', emoji: '🍖' },
+  { slug: 'bibim-guksu', name: '비빔국수', tag: '비국', color: '#e0492e', emoji: '🍜' },
+  { slug: 'jjukkumi', name: '쭈꾸미', tag: '쭈꾸', color: '#d23a4a', emoji: '🌶' },
+  { slug: 'nakji', name: '낙지볶음', tag: '낙지', color: '#b8323c', emoji: '🐙' },
+  { slug: 'omurice', name: '오므라이스', tag: '오므', color: '#e0a83c', emoji: '🍳' },
+  { slug: 'dolsot', name: '돌솥비빔밥', tag: '돌솥', color: '#c75a33', emoji: '🍚' },
+  { slug: 'ppyeo-haejang', name: '뼈해장국', tag: '뼈해', color: '#b0432e', emoji: '🍲' },
+  { slug: 'kongnamul-gukbap', name: '콩나물국밥', tag: '콩국', color: '#cdb86a', emoji: '🍲' },
+  { slug: 'samgyeopsal', name: '삼겹살', tag: '삼겹', color: '#e08a7a', emoji: '🥓' },
+  { slug: 'baekban', name: '백반', tag: '백반', color: '#cdb89a', emoji: '🍚' },
 ]
 
 export const LANGUAGE_BY_SLUG: Record<string, Omit<Language, 'votes'>> =

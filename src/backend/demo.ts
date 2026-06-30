@@ -5,6 +5,7 @@ import type {
   Language,
   VoteEvent,
   VoteResult,
+  Winner,
 } from '../types'
 import { LANGUAGES } from '../languages'
 
@@ -64,6 +65,19 @@ export class DemoBackend implements Backend {
   sendChat(_m: ChatMessage): void {
     // No other clients in demo mode. The chat panel shows your own message
     // optimistically, so there is nothing to broadcast here.
+  }
+
+  async rollRound(): Promise<void> {
+    // no rounds in demo mode
+  }
+
+  async loadWinners(): Promise<Winner[]> {
+    // a couple of plausible past winners so the hall of fame isn't empty
+    return [
+      { round_date: '2026-06-29', slug: 'chicken', name: '치킨', votes: 1840 },
+      { round_date: '2026-06-28', slug: 'pizza', name: '피자', votes: 1720 },
+      { round_date: '2026-06-27', slug: 'kimchi-stew', name: '김치찌개', votes: 1610 },
+    ]
   }
 
   subscribePresence(onCount: (n: number) => void): () => void {

@@ -92,6 +92,222 @@ body {
   white-space: nowrap;
 }
 
+/* ---------- header chips ---------- */
+.chip-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.chip {
+  padding: 7px 12px;
+  background: var(--panel-2);
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.06s, border-color 0.15s, background 0.15s;
+}
+.chip:hover {
+  border-color: var(--accent);
+  background: #2a2050;
+}
+.chip:active {
+  transform: translateY(1px);
+}
+
+/* ---------- modal ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 6, 18, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+  animation: feed-in 0.18s ease;
+}
+.modal-card {
+  width: min(520px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 3px solid var(--border);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 2px #0c0a16, 0 20px 50px rgba(0, 0, 0, 0.6);
+  padding: 16px;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.modal-title {
+  font-family: var(--pixel);
+  font-size: 13px;
+  margin: 0;
+  color: var(--ink);
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+.modal-close:hover {
+  color: var(--ink);
+}
+.modal-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 14px 0 8px;
+}
+h4.modal-subtitle {
+  font-family: var(--pixel);
+  font-size: 10px;
+  color: var(--accent);
+}
+
+/* ---------- stats + badges ---------- */
+.stats-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 5px;
+  font-size: 13px;
+}
+.stats-k {
+  color: var(--muted);
+}
+.stats-v {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.badge {
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  text-align: center;
+  opacity: 0.5;
+}
+.badge.is-on {
+  opacity: 1;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 211, 77, 0.3);
+}
+.badge-emoji {
+  display: block;
+  font-size: 22px;
+}
+.badge-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.badge-desc {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ---------- hall of fame ---------- */
+.hof-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hof-row {
+  display: grid;
+  grid-template-columns: auto 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 5px;
+  font-size: 13px;
+}
+.hof-row.is-latest {
+  box-shadow: inset 0 0 0 2px rgba(255, 211, 77, 0.45);
+}
+.hof-date {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.hof-emoji {
+  font-size: 18px;
+  text-align: center;
+}
+.hof-name {
+  font-weight: 700;
+}
+.hof-votes {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.hof-empty {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+/* ---------- toast ---------- */
+.toast-stack {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+  pointer-events: none;
+}
+.toast {
+  background: var(--panel-2);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 16px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  animation: feed-in 0.25s ease;
+  transition: opacity 0.4s, transform 0.4s;
+}
+.toast-out {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 /* ---------- battlefield ---------- */
 .battlefield {
   position: relative;

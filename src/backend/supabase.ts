@@ -10,6 +10,7 @@ import type {
   Language,
   VoteEvent,
   VoteResult,
+  Winner,
 } from '../types'
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../config'
 import { LANGUAGE_BY_SLUG } from '../languages'
@@ -144,6 +145,25 @@ export class SupabaseBackend implements Backend {
 
   sendChat(m: ChatMessage): void {
     this.joinArena().send({ type: 'broadcast', event: 'chat', payload: m })
+  }
+
+  async rollRound(): Promise<void> {
+    // Best-effort: if the function isn't installed yet, ignore (daily rounds off).
+    const { error } = await this.client.rpc('roll_round_if_due')
+    if (error) console.warn('[code-can] rollRound skipped:', error.message)
+  }
+
+  async loadWinners(): Promise<Winner[]> {
+    const { data, error } = await this.client
+      .from('winners')
+      .select('round_date,slug,name,votes')
+      .order('round_date', { ascending: false })
+      .limit(14)
+    if (error) {
+      console.warn('[code-can] loadWinners skipped:', error.message)
+      return []
+    }
+    return (data as Winner[]).map((w) => ({ ...w, votes: Number(w.votes) }))
   }
 
   subscribePresence(onCount: (n: number) => void): () => void {

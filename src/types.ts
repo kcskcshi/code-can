@@ -62,6 +62,14 @@ export interface ArenaHandlers {
   onAssault(a: AssaultEvent): void
 }
 
+/** A past daily-round winner, for the hall of fame. */
+export interface Winner {
+  round_date: string
+  slug: string
+  name: string
+  votes: number
+}
+
 /**
  * Backend abstraction. Two implementations exist:
  *  - SupabaseBackend: real Postgres + Realtime + Edge Function
@@ -92,4 +100,9 @@ export interface Backend {
   sendChat(m: ChatMessage): void
   /** Subscribe to the live count of connected players. */
   subscribePresence(onCount: (n: number) => void): () => void
+  /** Archive yesterday's winner and reset totals if a new day (KST) started.
+   * Call once at boot, before load(). No-op if the round is current. */
+  rollRound(): Promise<void>
+  /** Load recent daily-round winners (newest first) for the hall of fame. */
+  loadWinners(): Promise<Winner[]>
 }

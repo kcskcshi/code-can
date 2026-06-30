@@ -2,6 +2,7 @@ import type { Backend } from '../types'
 import type { Store } from '../store'
 import { el, rafThrottle } from './dom'
 import { fmtVotes } from './format'
+import { stats } from '../stats'
 
 const FLUSH_MS = 300 // batch rapid auto-fire ticks into one network call
 
@@ -124,12 +125,15 @@ export function mountCombatHud(
     if (pendingSlug && pendingSlug !== target && pendingAmt > 0) void flush()
     pendingSlug = target
     pendingAmt += Math.max(1, amount)
+    stats.recordAttack(Math.max(1, amount))
   }
 
   function onVote(target: string, amount: number) {
     if (pendingVoteSlug && pendingVoteSlug !== target && pendingVoteAmt > 0) void flushVote()
     pendingVoteSlug = target
     pendingVoteAmt += Math.max(1, amount)
+    stats.recordVote(Math.max(1, amount))
+    stats.recordMenu(target)
   }
 
   const renderChampion = rafThrottle(() => {
