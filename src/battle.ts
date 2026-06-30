@@ -398,13 +398,13 @@ export class BattleField {
     const delta = fmtDelta(kind === 'attack' ? -amount : amount)
     this.logLines.push({
       text: `${emoji} ${name} ${delta}`,
-      color: kind === 'attack' ? '#a83b52' : '#4f9e57',
+      color: kind === 'attack' ? '#ff7d96' : '#7bf0a3',
       x: 16,
-      y: this.h * 0.72,
-      vy: -12,
-      life: 3.5,
+      y: this.h * 0.78,
+      vy: -14,
+      life: 4,
     })
-    if (this.logLines.length > 18) this.logLines.shift()
+    if (this.logLines.length > 16) this.logLines.shift()
   }
 
   private cheer(slug: string, self: boolean) {
@@ -735,13 +735,18 @@ export class BattleField {
     ctx.fillText(`x${this.combo} COMBO!`, cx, cy)
   }
 
-  /** Faint rising "ticker" of recent votes/attacks, drawn behind the planets. */
+  /** Rising "ticker" of recent votes/attacks, drawn behind the planets. */
   private drawLog() {
     const ctx = this.ctx
     ctx.textAlign = 'left'
-    ctx.font = '8px "Press Start 2P", monospace'
+    ctx.font = '9px "Press Start 2P", monospace'
     for (const l of this.logLines) {
-      ctx.globalAlpha = Math.max(0, Math.min(0.22, l.life * 0.12))
+      const a = Math.max(0, Math.min(0.55, l.life * 0.18))
+      // subtle dark backing so the text reads against the planets/space
+      ctx.globalAlpha = a * 0.5
+      ctx.fillStyle = '#0a0a12'
+      ctx.fillText(l.text, l.x + 1, l.y + 1)
+      ctx.globalAlpha = a
       ctx.fillStyle = l.color
       ctx.fillText(l.text, l.x, l.y)
     }
