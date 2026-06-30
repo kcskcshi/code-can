@@ -26,6 +26,7 @@ async function boot() {
   const winnerChip = el('button', { class: 'chip', type: 'button', text: '👑 어제 우승: …' })
   const statsChip = el('button', { class: 'chip', type: 'button', text: '🏅 내 기록' })
   const shareChip = el('button', { class: 'chip', type: 'button', text: '📸 공유' })
+  const beatChip = el('button', { class: 'chip', type: 'button', text: '🥁 비트 OFF' })
   const canvas = el('canvas', { class: 'battle-canvas' })
   const battleWrap = el('section', { class: 'battlefield' }, [canvas])
   const hud = el('section', { class: 'hud-bar' })
@@ -44,7 +45,7 @@ async function boot() {
         class: 'tagline',
         text: '오늘 점심 뭐 먹지? 메뉴에 투표해 행성을 키우고, 라이벌 행성을 꾹 눌러 부숴라 🍱⚔',
       }),
-      el('div', { class: 'chip-row' }, [winnerChip, statsChip, shareChip]),
+      el('div', { class: 'chip-row' }, [winnerChip, statsChip, shareChip, beatChip]),
     ]),
     battleWrap,
     hud,
@@ -115,6 +116,15 @@ async function boot() {
   battle.onAttackTarget((slug, amount) => combat.onAttack(slug, amount))
   battle.onVoteTarget((slug, amount) => combat.onVote(slug, amount))
   battle.start()
+
+  // 🥁 toggle the Patapon-style drum beat (off by default; click is the gesture
+  // that unlocks Web Audio)
+  beatChip.addEventListener('click', () => {
+    void battle.toggleSound().then((on) => {
+      beatChip.textContent = on ? '🥁 비트 ON' : '🥁 비트 OFF'
+      beatChip.classList.toggle('is-on', on)
+    })
+  })
 }
 
 boot()

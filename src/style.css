@@ -119,6 +119,11 @@ body {
 .chip:active {
   transform: translateY(1px);
 }
+.chip.is-on {
+  border-color: var(--accent);
+  background: #2a2050;
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
 
 /* ---------- modal ---------- */
 .modal-overlay {

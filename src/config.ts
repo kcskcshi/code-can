@@ -10,3 +10,6 @@ export const BATTLE_SQUADS = 8
 
 /** Soldiers rendered for the #1 army; others scale by vote share. */
 export const MAX_SOLDIERS = 36
+
+/** Battle march tempo (beats/min). 4 beats per measure → "파타·파타·파타·폰". */
+export const BPM = 120

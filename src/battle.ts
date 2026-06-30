@@ -1,19 +1,18 @@
 import type { Store } from './store'
 import type { Language } from './types'
-import { BATTLE_SQUADS } from './config'
+import { BATTLE_SQUADS, BPM } from './config'
 import { LANGUAGE_BY_SLUG } from './languages'
 import { fmtVotes, fmtDelta } from './ui/format'
 import { stats } from './stats'
+import { DrumKit } from './audio/drums'
 
-/** A cute little eater orbiting a menu planet (Walkr-ish ambient life). */
+/** A tiny Patapon-style trooper marching on the ground beneath a menu planet. */
 interface Creature {
-  /** base orbit angle */
-  angle: number
   /** spawn animation 0 -> 1 */
   spawn: number
-  /** bob phase */
+  /** per-trooper phase offset so the march/hop isn't perfectly uniform */
   phase: number
-  /** scatter-on-hit 0..1 */
+  /** scatter-on-hit 0..1 (knocked back when the army is struck) */
   hit: number
 }
 
@@ -36,6 +35,8 @@ interface Body {
   crack: number
   /** squash-and-stretch jiggle on hit (0..1) */
   wobble: number
+  /** troopers wind up & lunge when the army throws spears (0..1) */
+  throwT: number
   x: number
   cy: number
   r: number
@@ -103,7 +104,12 @@ interface LogLine {
 
 const MAX_CREATURES = 10
 const RAID_DUR = 0.5
+const RAID_ARC = 40 // height of a thrown spear's lob (px)
 const FIRE_INTERVAL = 0.1 // seconds between auto-fire ticks while held
+
+const GROUND_Y_RATIO = 0.8 // troopers march on a line this far down the canvas
+const TROOPER_GAP = 8 // horizontal spacing between troopers in a squad
+const HOP = 7 // how high a trooper hops on its beat (px)
 
 export class BattleField {
   private ctx: CanvasRenderingContext2D
@@ -128,6 +134,17 @@ export class BattleField {
   private hitStop = 0
   private prevLeader: string | null = null
   private reduceMotion = false
+  // --- rhythm (Patapon-style beat) ---
+  private clock = 0 // accumulated seconds (canonical beat time)
+  private beatF = 0 // clock expressed in beats (float)
+  private beatPhase = 0 // 0..1 position within the current beat
+  private beatPulse = 0 // 1 at each beat onset, decaying to 0 — the "thump"
+  private lastBeat = -1 // last whole-beat index seen (for onBeat edge)
+  private downbeatFlash = 0 // brief ground flash on the "pon" downbeat
+  private soundOn = false
+  private drums = new DrumKit()
+  /** assaults waiting to launch on the next beat (so strikes land on rhythm) */
+  private pendingAssaults: { champion: string; target: string; amount: number }[] = []
   private onAttack: ((slug: string, amount: number) => void) | null = null
   private onVote: ((slug: string, amount: number) => void) | null = null
   private unsub: (() => void)[] = []
@@ -222,6 +239,13 @@ export class BattleField {
   /** Register the handler invoked on each vote tick (holding your own planet). */
   onVoteTarget(fn: (slug: string, amount: number) => void) {
     this.onVote = fn
+  }
+
+  /** Toggle the drum beat. Must be called from a user gesture (autoplay policy).
+   * Returns the new on/off state. */
+  async toggleSound(): Promise<boolean> {
+    this.soundOn = await this.drums.toggle()
+    return this.soundOn
   }
 
   /** Start auto-firing at the planet under a pointer. Returns false if it was
@@ -336,6 +360,7 @@ export class BattleField {
         hitFlash: 0,
         crack: 0,
         wobble: 0,
+        throwT: 0,
         x: 0,
         cy: 0,
         r: 16,
@@ -449,6 +474,12 @@ export class BattleField {
     b.wobble = 1
     this.shake = Math.min(12, this.shake + (1.2 + tier * 0.9) * mo)
     for (const c of b.creatures) if (Math.random() < 0.5) c.hit = 1
+    // my army lobs a spear at the rival every few ticks (not every tick — that
+    // would be a blizzard); thrown from my champion's squad
+    if (this.combo % 3 === 1) {
+      const champ = this.store.getChampion()
+      this.throwSpears(champ === slug ? null : champ, slug, 1)
+    }
     // gold coins + crumbs flying off — more, faster as the combo grows
     const coins = 3 + tier * 2
     for (let i = 0; i < coins; i++) {
@@ -509,31 +540,47 @@ export class BattleField {
     })
   }
 
-  /** A remote (or batched) strike: a comet streaks in, then the planet shatters. */
+  /** A remote (or batched) strike. Queue it; the comet launches on the next beat
+   * so strikes land on rhythm (visual only — the vote total already moved). */
   private onAssault(a: { champion: string; target: string; amount: number }) {
-    const target = this.bodies.find((b) => b.slug === a.target)
-    if (!target) return
-    const tx = target.x
-    const ty = target.cy
-    const champ = this.bodies.find((b) => b.slug === a.champion)
-    const sx = champ ? champ.x : tx < this.w / 2 ? -20 : this.w + 20
-    const sy = champ ? champ.cy : ty
+    this.pendingAssaults.push(a)
+    if (this.pendingAssaults.length > 24) this.pendingAssaults.shift()
+  }
+
+  /** Fire one queued strike: the attacking troopers hurl spears, then the
+   * target planet shatters as they land. */
+  private launchAssault(a: { champion: string; target: string; amount: number }) {
+    if (!this.throwSpears(a.champion, a.target, 3)) return
+    this.impacts.push({ slug: a.target, amount: a.amount, delay: RAID_DUR * 0.9 })
+  }
+
+  /** The `champion` army's ground troopers throw `count` spears in a lobbing arc
+   * toward the `target` planet. Returns false if the target isn't on screen. */
+  private throwSpears(championSlug: string | null, targetSlug: string, count: number): boolean {
+    const target = this.bodies.find((b) => b.slug === targetSlug)
+    if (!target) return false
+    const champ = championSlug ? this.bodies.find((b) => b.slug === championSlug) : undefined
+    const groundY = this.h * GROUND_Y_RATIO - 5 // spears leave from chest height
+    // launch from the attacking squad on the ground (or the screen edge if the
+    // attacker isn't among the on-screen armies)
+    const sx = champ ? champ.x : target.x < this.w / 2 ? -10 : this.w + 10
+    const sy = champ ? groundY : target.cy
     const color = champ?.color ?? '#fff7c2'
-    const n = 3
-    for (let i = 0; i < n; i++) {
+    if (champ) champ.throwT = 1 // troopers wind up & lunge
+    for (let i = 0; i < count; i++) {
       this.raiders.push({
-        sx,
-        sy: sy - (i % 3) * 5,
-        tx: tx + (i - 1) * 6,
-        ty,
+        sx: sx + (i - (count - 1) / 2) * 6,
+        sy,
+        tx: target.x + (i - (count - 1) / 2) * 6,
+        ty: target.cy,
         x: sx,
         y: sy,
-        t: -i * 0.05,
+        t: -i * 0.06,
         dur: RAID_DUR,
         color,
       })
     }
-    this.impacts.push({ slug: a.target, amount: a.amount, delay: RAID_DUR * 0.9 })
+    return true
   }
 
   /** A landed strike — coins, crumbs, cracks, shockwave. Scales with amount. */
@@ -574,7 +621,34 @@ export class BattleField {
     })
   }
 
+  /** Fires once per beat. measureBeat 0..2 = "pata", 3 = the "pon" downbeat. */
+  private onBeat(measureBeat: number) {
+    if (this.soundOn) this.drums.hit(measureBeat)
+    // launch any strikes that were waiting, so comets cluster on the beat
+    if (this.pendingAssaults.length) {
+      const queued = this.pendingAssaults
+      this.pendingAssaults = []
+      for (const a of queued) this.launchAssault(a)
+    }
+    if (measureBeat === 3) {
+      this.downbeatFlash = 1
+    }
+  }
+
   private update(dt: number) {
+    // --- rhythm clock: one source of truth for every beat-driven visual ---
+    this.clock += dt
+    this.beatF = this.clock * (BPM / 60)
+    const bi = Math.floor(this.beatF)
+    this.beatPhase = this.beatF - bi
+    if (bi !== this.lastBeat) {
+      this.lastBeat = bi
+      this.onBeat(bi % 4)
+    }
+    // thump envelope: spikes at the beat onset, eased toward 0 before the next
+    this.beatPulse = (1 - this.beatPhase) ** 2
+    this.downbeatFlash = Math.max(0, this.downbeatFlash - dt * 2.4)
+
     // hit-stop: a micro-freeze on big hits for extra punch
     if (this.hitStop > 0) {
       this.hitStop = Math.max(0, this.hitStop - dt)
@@ -607,6 +681,7 @@ export class BattleField {
       b.hitFlash = Math.max(0, b.hitFlash - dt * 3)
       b.crack = Math.max(0, b.crack - dt * 1.2)
       b.wobble = Math.max(0, b.wobble - dt * 4)
+      b.throwT = Math.max(0, b.throwT - dt * 3)
       b.bob += dt
       // ease the radius toward its target so growth/shrink is smooth
       const targetR = planetRadius(b.votes, leaderVotes, slot)
@@ -615,7 +690,6 @@ export class BattleField {
 
       if (b.creatures.length < b.target) {
         b.creatures.push({
-          angle: Math.random() * Math.PI * 2,
           spawn: 0,
           phase: Math.random() * Math.PI * 2,
           hit: 0,
@@ -627,7 +701,6 @@ export class BattleField {
         if (c.spawn < 1) c.spawn = Math.min(1, c.spawn + dt * 3)
         if (c.hit > 0) c.hit = Math.max(0, c.hit - dt * 2)
         c.phase += dt * 4
-        c.angle += dt * 0.5
       }
     }
 
@@ -636,7 +709,7 @@ export class BattleField {
       r.t = Math.min(1, r.t + dt / r.dur)
       const p = Math.max(0, r.t)
       r.x = r.sx + (r.tx - r.sx) * p
-      r.y = r.sy + (r.ty - r.sy) * p - Math.sin(p * Math.PI) * 30
+      r.y = r.sy + (r.ty - r.sy) * p - Math.sin(p * Math.PI) * RAID_ARC
     }
 
     this.impacts = this.impacts.filter((im) => {
@@ -693,7 +766,11 @@ export class BattleField {
 
     for (const r of this.raiders) {
       if (r.t < 0) continue
-      drawComet(ctx, Math.round(r.x), Math.round(r.y), r.color)
+      // point the spear along its current flight direction (analytic velocity)
+      const p = r.t
+      const vx = r.tx - r.sx
+      const vy = r.ty - r.sy - Math.cos(p * Math.PI) * Math.PI * RAID_ARC
+      drawSpear(ctx, Math.round(r.x), Math.round(r.y), Math.atan2(vy, vx), r.color)
     }
 
     for (const p of this.particles) {
@@ -755,6 +832,35 @@ export class BattleField {
     ctx.globalAlpha = 1
   }
 
+  /** Draw a menu's troopers as a small marching squad on the ground line. */
+  private drawSquad(b: Body, cx: number) {
+    const n = b.creatures.length
+    if (!n) return
+    const ctx = this.ctx
+    const groundY = this.h * GROUND_Y_RATIO
+    const face = cx <= this.w / 2 ? 1 : -1 // march toward the centre
+    const moAmp = this.reduceMotion ? 0.4 : 1
+    const perRow = 5
+    for (let i = 0; i < n; i++) {
+      const c = b.creatures[i]
+      if (c.spawn <= 0) continue
+      const row = Math.floor(i / perRow)
+      const col = i % perRow
+      const cols = Math.min(n - row * perRow, perRow)
+      const x = cx + (col - (cols - 1) / 2) * TROOPER_GAP * face
+      // each trooper hops once per beat, staggered by column → a marching wave
+      const lb = this.beatF - col * 0.05 - row * 0.1
+      const hop = Math.max(0, Math.sin((lb - Math.floor(lb)) * Math.PI))
+      let y = groundY - row * 6 - hop * HOP * moAmp
+      y -= Math.sin(c.phase) * 0.6 * moAmp // gentle idle bob between beats
+      y -= this.downbeatFlash * 2 * moAmp // whole squad lifts on the "pon"
+      y -= c.hit * 8 // knocked up when the army is struck
+      y -= b.throwT * 3 * moAmp // hop as they hurl
+      const kx = -face * c.hit * 6 + face * b.throwT * 3 // lunge forward to throw
+      drawTrooper(ctx, Math.round(x + kx), Math.round(y), b.color, face, c.spawn)
+    }
+  }
+
   private drawBackground(time: number) {
     const ctx = this.ctx
     const g = ctx.createLinearGradient(0, 0, 0, this.h)
@@ -784,20 +890,36 @@ export class BattleField {
       ctx.fillRect(Math.round(x), Math.round(y), 2, 2)
     }
     ctx.globalAlpha = 1
+
+    // --- ground the armies march on ---
+    const groundY = this.h * GROUND_Y_RATIO
+    const gg = ctx.createLinearGradient(0, groundY, 0, this.h)
+    gg.addColorStop(0, '#241a33')
+    gg.addColorStop(1, '#0e0a18')
+    ctx.fillStyle = gg
+    ctx.fillRect(0, groundY, this.w, this.h - groundY)
+    // horizon line, brightening on the "pon" downbeat
+    ctx.fillStyle = `rgba(150,120,220,${0.25 + this.downbeatFlash * 0.5})`
+    ctx.fillRect(0, Math.round(groundY), this.w, 1)
+    // short dashes scrolling left → the sense of marching forward
+    const gap = 26
+    const off = (this.clock * 40) % gap
+    ctx.fillStyle = 'rgba(124,92,255,0.18)'
+    for (let gx = -gap; gx < this.w + gap; gx += gap) {
+      ctx.fillRect(Math.round(gx - off), Math.round(groundY + 5), 10, 2)
+    }
   }
 
   private drawBody(b: Body, time: number, champion: string | null) {
     const ctx = this.ctx
     const cx = Math.round(b.x)
-    const cy = Math.round(b.cy + Math.sin(b.bob) * 3)
-    const r = Math.round(b.r * (1 + b.bounce * 0.12))
+    // the planet floats above; it lifts a touch on each beat (the "thump")
+    const cy = Math.round(b.cy + Math.sin(b.bob) * 3 - this.beatPulse * 2)
+    const r = Math.round(b.r * (1 + b.bounce * 0.12 + this.beatPulse * 0.04))
     const isLeader = b.rank === 0
 
-    // orbiting creatures behind the planet
-    for (const c of b.creatures) {
-      if (Math.sin(c.angle) >= 0) continue // back half
-      drawCreature(ctx, b, c, cx, cy, r, time)
-    }
+    // marching trooper squad on the ground below the planet
+    this.drawSquad(b, cx)
 
     // squash-and-stretch on hit (wraps body + face only)
     ctx.save()
@@ -898,12 +1020,6 @@ export class BattleField {
     }
     ctx.restore()
 
-    // orbiting creatures in front
-    for (const c of b.creatures) {
-      if (Math.sin(c.angle) < 0) continue
-      drawCreature(ctx, b, c, cx, cy, r, time)
-    }
-
     // selection / target ring — your planet (gold, vote) vs a rival (red, attack)
     ctx.textAlign = 'center'
     if (b.slug === champion) {
@@ -972,41 +1088,67 @@ function planetRadius(votes: number, leaderVotes: number, slot: number): number 
   return minR + Math.sqrt(Math.max(0, ratio)) * (maxR - minR)
 }
 
-/** A tiny round eater orbiting a planet. */
-function drawCreature(
+/** A tiny Patapon-style trooper: dark silhouette, single menu-coloured eye, a
+ * little spear. `face` is +1 (marching right) or −1 (left); `y` is the feet. */
+function drawTrooper(
   ctx: CanvasRenderingContext2D,
-  b: Body,
-  c: Creature,
-  cx: number,
-  cy: number,
-  r: number,
-  _time: number,
+  x: number,
+  y: number,
+  color: string,
+  face: number,
+  spawn: number,
 ) {
-  if (c.spawn <= 0) return
-  const ox = r + 9 + c.hit * 18
-  const oy = r * 0.55 + 5
-  const x = Math.round(cx + Math.cos(c.angle) * ox)
-  const y = Math.round(cy + Math.sin(c.angle) * oy + Math.sin(c.phase) * 2)
-  const s = 4
   ctx.save()
-  ctx.globalAlpha = c.spawn
-  ctx.fillStyle = shade(b.color, 0.18)
-  ctx.fillRect(x - s / 2, y - s / 2, s, s)
-  ctx.fillStyle = '#1a1024'
-  ctx.fillRect(x - 1, y - 1, 1, 1) // tiny eye
+  ctx.globalAlpha = spawn
+  // soft shadow on the ground so the trooper reads as standing on it
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.fillRect(x - 3, y + 3, 6, 1.5)
+  // spear (bright tip) pointing the way the army marches
+  ctx.strokeStyle = shade(color, 0.35)
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(x + face * 3, y + 1)
+  ctx.lineTo(x + face * 3, y - 10)
+  ctx.stroke()
+  // silhouette tinted to the menu colour (dark, but visible on dark ground)
+  const body = shade(color, -0.24)
+  ctx.fillStyle = body
+  ctx.beginPath()
+  ctx.arc(x, y - 5, 3, 0, Math.PI * 2) // helmet/head
+  ctx.fill()
+  ctx.fillRect(x - 2, y - 4, 4, 5) // torso
+  ctx.fillRect(x - 2, y + 1, 1.5, 2) // legs
+  ctx.fillRect(x + 0.5, y + 1, 1.5, 2)
+  // helmet rim highlight for a little shape
+  ctx.fillStyle = shade(color, 0.1)
+  ctx.fillRect(x - 2, y - 7, 4, 1)
+  // single bright eye on the facing side
+  ctx.fillStyle = shade(color, 0.55)
+  ctx.fillRect(x - 0.5 + face * 1.5, y - 6, 1.5, 1.5)
   ctx.restore()
 }
 
-/** A little comet head with a short tail. */
-function drawComet(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
-  ctx.globalAlpha = 0.5
-  ctx.fillStyle = color
-  ctx.fillRect(x - 6, y - 1, 6, 2)
-  ctx.globalAlpha = 1
+/** A thrown spear, rotated to face its flight direction. */
+function drawSpear(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, color: string) {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+  // shaft
+  ctx.strokeStyle = shade(color, 0.15)
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(-6, 0)
+  ctx.lineTo(4, 0)
+  ctx.stroke()
+  // bright metal tip
   ctx.fillStyle = '#fff7c2'
-  ctx.fillRect(x - 2, y - 2, 4, 4)
-  ctx.fillStyle = '#ffd34d'
-  ctx.fillRect(x - 1, y - 1, 2, 2)
+  ctx.beginPath()
+  ctx.moveTo(8, 0)
+  ctx.lineTo(3, -2.5)
+  ctx.lineTo(3, 2.5)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
 }
 
 function drawFarPlanet(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
