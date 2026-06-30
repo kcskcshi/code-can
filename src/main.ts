@@ -8,6 +8,8 @@ import { SupabaseBackend } from './backend/supabase'
 import { mountLeaderboard } from './ui/leaderboard'
 import { mountVotePanel } from './ui/votePanel'
 import { mountLiveFeed } from './ui/liveFeed'
+import { mountCombatPanel } from './ui/combatPanel'
+import { mountChatPanel } from './ui/chatPanel'
 import { el } from './ui/dom'
 
 async function boot() {
@@ -21,6 +23,8 @@ async function boot() {
   const colLeft = el('div', { class: 'col col-left' })
   const colMid = el('div', { class: 'col col-mid' })
   const colRight = el('div', { class: 'col col-right' })
+  const colCombat = el('div', { class: 'col col-combat' })
+  const colChat = el('div', { class: 'col col-chat' })
 
   app.append(
     el('header', { class: 'site-header' }, [
@@ -35,6 +39,7 @@ async function boot() {
     ]),
     battleWrap,
     el('main', { class: 'grid' }, [colLeft, colMid, colRight]),
+    el('section', { class: 'arena-row' }, [colCombat, colChat]),
     el('footer', { class: 'site-footer' }, [
       el('p', {
         text: '스페인 길거리에서 여행자들이 "가장 위대한 언어"를 묻는 깡통 투표로 여비를 벌던 일화에서 출발했습니다.',
@@ -61,13 +66,20 @@ async function boot() {
       ? 'Supabase 실시간 연결됨'
       : 'Supabase 미설정 — 로컬 시뮬레이션 모드 (README 참고)'
 
-  // stream remote votes into the store
+  // stream remote votes/attacks into the store
   backend.subscribe((e) => store.applyVote(e, false))
+  // stream ephemeral chat + assault animations from the arena channel
+  backend.subscribeArena({
+    onChat: (m) => store.addChat(m),
+    onAssault: (a) => store.emitAssault(a),
+  })
 
   // --- mount UI -------------------------------------------------------------
   mountLeaderboard(colLeft, store)
   mountVotePanel(colMid, store, backend)
   mountLiveFeed(colRight, store)
+  mountCombatPanel(colCombat, store, backend)
+  mountChatPanel(colChat, store, backend)
 
   const battle = new BattleField(canvas, store)
   battle.start()

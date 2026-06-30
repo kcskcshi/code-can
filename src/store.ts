@@ -1,4 +1,4 @@
-import type { Language, VoteEvent } from './types'
+import type { AssaultEvent, ChatMessage, Language, VoteEvent } from './types'
 
 export interface FeedItem {
   id: number
@@ -8,24 +8,36 @@ export interface FeedItem {
   color: string
   total: number
   self: boolean
+  /** 'vote' = gained votes, 'attack' = lost votes to combat */
+  kind: 'vote' | 'attack'
 }
 
 type ChangeListener = () => void
 type FxListener = (e: VoteEvent & { self: boolean }) => void
+type AssaultListener = (a: AssaultEvent) => void
+type ChatListener = () => void
+type ChampionListener = (slug: string | null) => void
 
 const FEED_MAX = 24
+const CHAT_MAX = 50
 
 /**
- * Single source of truth on the client. The backend pushes vote events in;
- * the leaderboard/feed listen for `change`, the battlefield listens for `fx`.
+ * Single source of truth on the client. The backend pushes vote/attack events
+ * in; the leaderboard/feed listen for `change`, the battlefield listens for
+ * `fx`/`assault`, the chat panel listens for `chatChange`.
  */
 export class Store {
   private bySlug = new Map<string, Language>()
   private lastTotal = new Map<string, number>()
   private feed: FeedItem[] = []
+  private chat: ChatMessage[] = []
   private changeListeners = new Set<ChangeListener>()
   private fxListeners = new Set<FxListener>()
+  private assaultListeners = new Set<AssaultListener>()
+  private chatListeners = new Set<ChatListener>()
+  private championListeners = new Set<ChampionListener>()
   private feedId = 0
+  private championSlug: string | null = null
 
   init(langs: Language[]) {
     this.bySlug.clear()
@@ -37,16 +49,24 @@ export class Store {
     this.emitChange()
   }
 
-  /** Apply a vote (from the live stream or our own optimistic action). */
+  /** Apply a vote or attack (from the live stream or our own optimistic action). */
   applyVote(e: VoteEvent, self = false) {
     const lang = this.bySlug.get(e.slug)
     if (!lang) return
-    // Totals are strictly increasing per language, so (slug,total) is an
-    // idempotency key: drop stale events and echoes of our own optimistic vote.
+    const kind = e.kind ?? 'vote'
     const seen = this.lastTotal.get(e.slug) ?? lang.votes
-    if (e.total <= seen) return
+    // (slug,total) is an idempotency key: an exact match is the echo of our own
+    // optimistic update or a duplicate event — drop it.
+    if (e.total === seen) return
+    // Votes are monotonic, so a lower total is a stale/out-of-order vote — drop.
+    // Attacks legitimately move the total down, so they bypass this guard.
+    if (kind !== 'attack' && e.total < seen) return
+
     this.lastTotal.set(e.slug, e.total)
     lang.votes = e.total
+    // A self-vote sets your champion (the army you're fighting for).
+    if (self && kind === 'vote') this.setChampion(e.slug)
+
     this.feed.unshift({
       id: this.feedId++,
       slug: lang.slug,
@@ -55,12 +75,54 @@ export class Store {
       color: lang.color,
       total: lang.votes,
       self,
+      kind,
     })
     if (this.feed.length > FEED_MAX) this.feed.length = FEED_MAX
-    this.fxListeners.forEach((fn) => fn({ ...e, self }))
+    this.fxListeners.forEach((fn) => fn({ ...e, kind, self }))
     this.emitChange()
   }
 
+  /** Relay an assault to the battlefield (animation only; totals come via applyVote). */
+  emitAssault(a: AssaultEvent) {
+    this.assaultListeners.forEach((fn) => fn(a))
+  }
+
+  // ---- champion (your army) -------------------------------------------------
+  setChampion(slug: string) {
+    if (this.championSlug === slug) return
+    if (!this.bySlug.has(slug)) return
+    this.championSlug = slug
+    this.championListeners.forEach((fn) => fn(slug))
+  }
+
+  /** The chosen champion, falling back to the current leader. */
+  getChampion(): string | null {
+    if (this.championSlug && this.bySlug.has(this.championSlug)) return this.championSlug
+    return this.ranked()[0]?.slug ?? null
+  }
+
+  onChampionChange(fn: ChampionListener): () => void {
+    this.championListeners.add(fn)
+    return () => this.championListeners.delete(fn)
+  }
+
+  // ---- chat (ephemeral) -----------------------------------------------------
+  addChat(m: ChatMessage) {
+    this.chat.push(m)
+    if (this.chat.length > CHAT_MAX) this.chat.splice(0, this.chat.length - CHAT_MAX)
+    this.chatListeners.forEach((fn) => fn())
+  }
+
+  recentChat(): ChatMessage[] {
+    return this.chat
+  }
+
+  onChatChange(fn: ChatListener): () => void {
+    this.chatListeners.add(fn)
+    return () => this.chatListeners.delete(fn)
+  }
+
+  // ---- queries --------------------------------------------------------------
   ranked(): Language[] {
     return [...this.bySlug.values()].sort((a, b) => b.votes - a.votes)
   }
@@ -87,6 +149,11 @@ export class Store {
   onFx(fn: FxListener): () => void {
     this.fxListeners.add(fn)
     return () => this.fxListeners.delete(fn)
+  }
+
+  onAssault(fn: AssaultListener): () => void {
+    this.assaultListeners.add(fn)
+    return () => this.assaultListeners.delete(fn)
   }
 
   private emitChange() {

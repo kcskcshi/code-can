@@ -3,8 +3,10 @@
 -- Dashboard -> SQL Editor -> New query -> paste this whole file -> Run.
 --
 -- This is everything the deployed app needs: schema + RLS + realtime + seed +
--- the `cast_vote` RPC the frontend calls directly. No Edge Function required.
--- (Combines migrations 0001 + 0002 + 0003. Safe to re-run; idempotent.)
+-- the `cast_vote` RPC and the `attack_language` combat RPC the frontend calls
+-- directly. No Edge Function required. (Live chat needs no SQL — it rides
+-- Realtime broadcast.) Combines migrations 0001 + 0002 + 0003 + 0004.
+-- Safe to re-run; idempotent.
 -- ============================================================================
 
 -- ---- schema -----------------------------------------------------------------
@@ -130,3 +132,60 @@ end;
 $$;
 
 grant execute on function public.cast_vote(text) to anon, authenticated;
+
+-- ---- combat: anon-callable attack that removes votes from a rival -----------
+create table if not exists public.attack_log (
+  id          bigint generated always as identity primary key,
+  target_slug text not null references public.languages(slug),
+  ip_hash     text not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists attack_log_ip_time_idx on public.attack_log (ip_hash, created_at desc);
+
+alter table public.attack_log enable row level security;
+
+create or replace function public.attack_language(p_target text)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ip      text;
+  v_hash    text;
+  v_recent  int;
+  new_total bigint;
+  damage    int := 3;
+begin
+  v_ip := split_part(
+    coalesce(
+      nullif(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''),
+      current_setting('request.headers', true)::json ->> 'cf-connecting-ip',
+      'local'
+    ), ',', 1);
+  v_hash := md5('code-can:' || v_ip);
+
+  -- rate limit: at most 3 attacks per 15 seconds per IP
+  select count(*) into v_recent
+    from public.attack_log
+   where ip_hash = v_hash
+     and created_at > now() - interval '15 seconds';
+  if v_recent >= 3 then
+    raise exception 'rate_limited' using errcode = 'check_violation';
+  end if;
+
+  update public.languages
+     set total_votes = greatest(0, total_votes - damage)
+   where slug = p_target
+   returning total_votes into new_total;
+  if new_total is null then
+    raise exception 'unknown language: %', p_target using errcode = 'no_data_found';
+  end if;
+
+  insert into public.attack_log (target_slug, ip_hash) values (p_target, v_hash);
+  return new_total;
+end;
+$$;
+
+grant execute on function public.attack_language(text) to anon, authenticated;

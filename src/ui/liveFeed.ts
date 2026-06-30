@@ -17,10 +17,14 @@ export function mountLiveFeed(root: HTMLElement, store: Store): void {
       ...items.map((it) => {
         const dot = el('span', { class: 'feed-dot' })
         dot.style.background = it.color
-        return el('li', { class: it.self ? 'feed-item is-self' : 'feed-item' }, [
+        const attack = it.kind === 'attack'
+        const cls =
+          'feed-item' + (it.self ? ' is-self' : '') + (attack ? ' is-attack' : '')
+        const msg = attack ? '공격받음 ⚔' : it.self ? '내 한 표 ⚔' : '득표'
+        return el('li', { class: cls }, [
           dot,
           el('span', { class: 'feed-name', text: it.name }),
-          el('span', { class: 'feed-msg', text: it.self ? '내 한 표 ⚔' : '득표' }),
+          el('span', { class: 'feed-msg', text: msg }),
           el('span', { class: 'feed-total', text: it.total.toLocaleString() }),
         ])
       }),

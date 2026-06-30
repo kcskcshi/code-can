@@ -1,5 +1,14 @@
-import type { Backend, Language, VoteEvent, VoteResult } from '../types'
+import type {
+  ArenaHandlers,
+  Backend,
+  ChatMessage,
+  Language,
+  VoteEvent,
+  VoteResult,
+} from '../types'
 import { LANGUAGES } from '../languages'
+
+const ATTACK_DAMAGE = 3
 
 /**
  * In-memory backend so the site is fully alive on GitHub Pages before a
@@ -11,6 +20,7 @@ export class DemoBackend implements Backend {
 
   private langs: Language[] = []
   private listeners = new Set<(e: VoteEvent) => void>()
+  private arena = new Set<ArenaHandlers>()
   private timer: ReturnType<typeof setInterval> | null = null
 
   async load(): Promise<Language[]> {
@@ -32,8 +42,28 @@ export class DemoBackend implements Backend {
     const lang = this.langs.find((l) => l.slug === slug)
     if (!lang) return { ok: false, error: 'unknown language' }
     lang.votes += 1
-    this.emit({ slug, total: lang.votes, amount: 1 })
+    this.emit({ slug, total: lang.votes, amount: 1, kind: 'vote' })
     return { ok: true, total: lang.votes }
+  }
+
+  async attack(target: string, champion: string): Promise<VoteResult> {
+    const lang = this.langs.find((l) => l.slug === target)
+    if (!lang) return { ok: false, error: 'unknown language' }
+    const removed = Math.min(ATTACK_DAMAGE, lang.votes)
+    lang.votes = Math.max(0, lang.votes - ATTACK_DAMAGE)
+    this.emit({ slug: target, total: lang.votes, amount: removed, kind: 'attack' })
+    for (const h of this.arena) h.onAssault({ champion, target, amount: removed })
+    return { ok: true, total: lang.votes }
+  }
+
+  subscribeArena(handlers: ArenaHandlers): () => void {
+    this.arena.add(handlers)
+    return () => this.arena.delete(handlers)
+  }
+
+  sendChat(_m: ChatMessage): void {
+    // No other clients in demo mode. The chat panel shows your own message
+    // optimistically, so there is nothing to broadcast here.
   }
 
   private snapshot(): Language[] {
@@ -64,7 +94,7 @@ export class DemoBackend implements Backend {
       }
       const lang = this.langs[idx]
       lang.votes += 1
-      this.emit({ slug: lang.slug, total: lang.votes, amount: 1 })
+      this.emit({ slug: lang.slug, total: lang.votes, amount: 1, kind: 'vote' })
     }, 900)
   }
 }

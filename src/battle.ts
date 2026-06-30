@@ -23,7 +23,10 @@ interface Squad {
   rank: number
   soldiers: Soldier[]
   target: number
+  /** white pulse on a vote */
   flash: number
+  /** red pulse when hit by an attack */
+  hitFlash: number
   x: number
   bob: number
 }
@@ -46,13 +49,37 @@ interface Particle {
   color: string
 }
 
+/** A soldier charging from the attacking army toward a defender (invasion FX). */
+interface Raider {
+  sx: number
+  sy: number
+  tx: number
+  ty: number
+  x: number
+  y: number
+  /** travel progress 0..1 */
+  t: number
+  dur: number
+  color: string
+}
+
+/** A scheduled hit that lands when the raiders arrive (delays the defender's reaction). */
+interface Impact {
+  slug: string
+  amount: number
+  delay: number
+}
+
 const COLS = 6 // soldiers per row in a squad cluster
+const RAID_DUR = 0.55 // seconds for a raider to cross to its target
 
 export class BattleField {
   private ctx: CanvasRenderingContext2D
   private squads: Squad[] = []
   private floats: FloatText[] = []
   private particles: Particle[] = []
+  private raiders: Raider[] = []
+  private impacts: Impact[] = []
   private w = 0
   private h = 0
   private dpr = 1
@@ -74,7 +101,13 @@ export class BattleField {
     this.unsub.push(() => ro.disconnect())
 
     this.unsub.push(this.store.onChange(() => this.syncSquads()))
-    this.unsub.push(this.store.onFx((e) => this.onVote(e.slug, e.self)))
+    // Votes drive the cheer FX; attacks are visualised by the assault stream.
+    this.unsub.push(
+      this.store.onFx((e) => {
+        if ((e.kind ?? 'vote') === 'vote') this.onVote(e.slug, e.self)
+      }),
+    )
+    this.unsub.push(this.store.onAssault((a) => this.onAssault(a)))
 
     this.resize()
     this.syncSquads()
@@ -132,6 +165,7 @@ export class BattleField {
         soldiers: [],
         target,
         flash: 0,
+        hitFlash: 0,
         x: 0,
         bob: Math.random() * Math.PI * 2,
       }
@@ -180,9 +214,72 @@ export class BattleField {
     }
   }
 
+  /** Launch an invasion: raiders charge from the attacker to the defender. The
+   * defender's reaction (red flash, falling soldiers, "-N") lands on arrival. */
+  private onAssault(a: { champion: string; target: string; amount: number }) {
+    const targetSq = this.squads.find((sq) => sq.slug === a.target)
+    if (!targetSq) return // off-screen target — nothing to animate
+    const groundY = this.h - 26
+    const tx = targetSq.x
+    const ty = groundY - 30
+    const champ = this.squads.find((sq) => sq.slug === a.champion)
+    // Charge from the champion army if it's on screen, else from the near edge.
+    const sx = champ ? champ.x : tx < this.w / 2 ? -20 : this.w + 20
+    const sy = groundY - 30
+    const color = champ?.color ?? '#ffffff'
+    const n = 5
+    for (let i = 0; i < n; i++) {
+      this.raiders.push({
+        sx,
+        sy: sy - (i % 3) * 4,
+        tx: tx + (i - 2) * 5,
+        ty,
+        x: sx,
+        y: sy,
+        t: -i * 0.06, // slight stagger so they don't overlap perfectly
+        dur: RAID_DUR,
+        color,
+      })
+    }
+    this.impacts.push({ slug: a.target, amount: a.amount, delay: RAID_DUR * 0.9 })
+  }
+
+  /** Resolve a landed assault on the defender squad. */
+  private applyImpact(im: Impact) {
+    const s = this.squads.find((sq) => sq.slug === im.slug)
+    if (!s) return
+    s.hitFlash = 1
+    // knock a few defenders backward (negative lunge)
+    for (const sol of s.soldiers) {
+      if (Math.random() < 0.5) sol.attack = -1
+    }
+    const groundY = this.h - 26
+    this.floats.push({
+      x: s.x,
+      y: groundY - 96,
+      vy: -26,
+      life: 1.3,
+      text: `-${im.amount}`,
+      color: '#ff6b8a',
+    })
+    for (let i = 0; i < 16; i++) {
+      const a = Math.random() * Math.PI * 2
+      const sp = 40 + Math.random() * 90
+      this.particles.push({
+        x: s.x,
+        y: groundY - 40,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 40,
+        life: 0.5 + Math.random() * 0.4,
+        color: i % 2 ? '#ff6b8a' : '#ffffff',
+      })
+    }
+  }
+
   private update(dt: number) {
     for (const s of this.squads) {
       s.flash = Math.max(0, s.flash - dt * 2.5)
+      s.hitFlash = Math.max(0, s.hitFlash - dt * 2.5)
       s.bob += dt
       // grow/shrink the army toward its target a little each frame
       if (s.soldiers.length < s.target) {
@@ -199,10 +296,31 @@ export class BattleField {
       }
       for (const sol of s.soldiers) {
         if (sol.spawn < 1) sol.spawn = Math.min(1, sol.spawn + dt * 4)
-        if (sol.attack > 0) sol.attack = Math.max(0, sol.attack - dt * 3)
+        // lunge decays toward 0 from either side (+ = attack, - = knockback)
+        if (sol.attack !== 0) {
+          const d = dt * 3
+          sol.attack = sol.attack > 0 ? Math.max(0, sol.attack - d) : Math.min(0, sol.attack + d)
+        }
         sol.phase += dt * 6
       }
     }
+
+    // raiders charge along an arc toward their target
+    this.raiders = this.raiders.filter((r) => r.t < 1)
+    for (const r of this.raiders) {
+      r.t = Math.min(1, r.t + dt / r.dur)
+      const p = Math.max(0, r.t)
+      r.x = r.sx + (r.tx - r.sx) * p
+      r.y = r.sy + (r.ty - r.sy) * p - Math.sin(p * Math.PI) * 26
+    }
+
+    // landed assaults resolve after their travel delay
+    this.impacts = this.impacts.filter((im) => {
+      im.delay -= dt
+      if (im.delay > 0) return true
+      this.applyImpact(im)
+      return false
+    })
 
     this.floats = this.floats.filter((f) => (f.life -= dt) > 0)
     for (const f of this.floats) {
@@ -227,6 +345,12 @@ export class BattleField {
     const groundY = this.h - 26
     // draw squads sorted so leftmost paints first (no real depth needed)
     for (const s of this.squads) this.drawSquad(s, groundY)
+
+    // charging raiders ride above the armies
+    for (const r of this.raiders) {
+      if (r.t < 0) continue
+      drawRaider(ctx, Math.round(r.x), Math.round(r.y), r.color)
+    }
 
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2))
@@ -293,10 +417,16 @@ export class BattleField {
       drawSoldier(ctx, Math.round(gx + lunge), Math.round(gy + bob), u, s.color, pop, sol)
     }
 
-    // flash overlay
+    // flash overlay — white on a vote, red when hit by an attack
     if (s.flash > 0) {
       ctx.globalAlpha = s.flash * 0.5
       ctx.fillStyle = '#ffffff'
+      ctx.fillRect(Math.round(s.x - clusterW / 2 - 4), groundY - 80, clusterW + 8, 86)
+      ctx.globalAlpha = 1
+    }
+    if (s.hitFlash > 0) {
+      ctx.globalAlpha = s.hitFlash * 0.55
+      ctx.fillStyle = '#ff3b5c'
       ctx.fillRect(Math.round(s.x - clusterW / 2 - 4), groundY - 80, clusterW + 8, 86)
       ctx.globalAlpha = 1
     }
@@ -382,6 +512,23 @@ function drawSoldier(
   ctx.fillStyle = '#fff'
   ctx.fillRect(left + 5 * u - 1, baseY - 10 * u, 3, 1 * u)
   ctx.restore()
+}
+
+/** A small charging soldier for the invasion animation (feet near x,y). */
+function drawRaider(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
+  ctx.fillStyle = shade(color, -0.4)
+  ctx.fillRect(x - 3, y - 9, 6, 2) // helmet
+  ctx.fillStyle = '#f2c79a'
+  ctx.fillRect(x - 3, y - 7, 6, 3) // head
+  ctx.fillStyle = color
+  ctx.fillRect(x - 3, y - 4, 6, 5) // body
+  ctx.fillStyle = shade(color, -0.4)
+  ctx.fillRect(x - 3, y + 1, 2, 2) // legs
+  ctx.fillRect(x + 1, y + 1, 2, 2)
+  ctx.fillStyle = '#d7d2e6'
+  ctx.fillRect(x + 3, y - 11, 1, 10) // spear (forward)
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(x + 3, y - 11, 3, 1) // spear tip
 }
 
 function easeOut(t: number): number {
