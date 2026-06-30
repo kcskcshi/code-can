@@ -144,7 +144,32 @@ export class SupabaseBackend implements Backend {
   }
 
   sendChat(m: ChatMessage): void {
+    // Instant delivery to connected clients...
     this.joinArena().send({ type: 'broadcast', event: 'chat', payload: m })
+    // ...plus persist for the round so a refresh keeps it (fire-and-forget).
+    void this.client
+      .rpc('post_message', { p_nick: m.nick, p_text: m.text })
+      .then(({ error }) => {
+        if (error) console.warn('[code-can] post_message skipped:', error.message)
+      })
+  }
+
+  async loadChat(): Promise<ChatMessage[]> {
+    // Best-effort: if `messages` isn't installed yet, fall back to no history.
+    const { data, error } = await this.client
+      .from('messages')
+      .select('nick,text,created_at')
+      .order('created_at', { ascending: true })
+      .limit(50)
+    if (error) {
+      console.warn('[code-can] loadChat skipped:', error.message)
+      return []
+    }
+    return (data as { nick: string; text: string; created_at: string }[]).map((r) => ({
+      nick: r.nick,
+      text: r.text,
+      ts: Date.parse(r.created_at),
+    }))
   }
 
   async rollRound(): Promise<void> {

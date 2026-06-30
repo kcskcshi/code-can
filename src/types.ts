@@ -34,7 +34,8 @@ export type VoteResult =
   | { ok: true; total: number }
   | { ok: false; error: string; retryAfter?: number }
 
-/** An ephemeral chat line broadcast to connected clients (never persisted). */
+/** A chat line: delivered live over the arena broadcast and persisted in the
+ * `messages` table for the current round (swept daily by roll_round_if_due). */
 export interface ChatMessage {
   /** auto-assigned pixel nickname */
   nick: string
@@ -96,8 +97,11 @@ export interface Backend {
   ): Promise<VoteResult>
   /** Subscribe to the ephemeral arena channel (chat + assault). */
   subscribeArena(handlers: ArenaHandlers): () => void
-  /** Broadcast a chat message (fire-and-forget; never persisted). */
+  /** Send a chat message: broadcast it live and persist it for the round
+   * (fire-and-forget). */
   sendChat(m: ChatMessage): void
+  /** Load this round's persisted chat (oldest first) so a refresh keeps the log. */
+  loadChat(): Promise<ChatMessage[]>
   /** Subscribe to the live count of connected players. */
   subscribePresence(onCount: (n: number) => void): () => void
   /** Archive yesterday's winner and reset totals if a new day (KST) started.

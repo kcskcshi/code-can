@@ -96,7 +96,9 @@ async function boot() {
 
   // stream remote votes/attacks into the store
   backend.subscribe((e) => store.applyVote(e, false))
-  // stream ephemeral chat + assault animations from the arena channel
+  // seed this round's persisted chat before subscribing, then stream live chat
+  // + assault animations from the arena channel
+  for (const m of await backend.loadChat()) store.addChat(m)
   backend.subscribeArena({
     onChat: (m) => store.addChat(m),
     onAssault: (a) => store.emitAssault(a),

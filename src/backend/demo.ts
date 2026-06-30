@@ -67,6 +67,11 @@ export class DemoBackend implements Backend {
     // optimistically, so there is nothing to broadcast here.
   }
 
+  async loadChat(): Promise<ChatMessage[]> {
+    // No persistence in demo mode — chat starts empty each session.
+    return []
+  }
+
   async rollRound(): Promise<void> {
     // no rounds in demo mode
   }

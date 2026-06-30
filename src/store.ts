@@ -106,8 +106,13 @@ export class Store {
     return () => this.championListeners.delete(fn)
   }
 
-  // ---- chat (ephemeral) -----------------------------------------------------
+  // ---- chat ------------------------------------------------------------------
   addChat(m: ChatMessage) {
+    // Guard against the narrow window where a live broadcast and the persisted
+    // history both carry the same line — same (nick, ts, text) means a dupe.
+    if (this.chat.some((c) => c.ts === m.ts && c.nick === m.nick && c.text === m.text)) {
+      return
+    }
     this.chat.push(m)
     if (this.chat.length > CHAT_MAX) this.chat.splice(0, this.chat.length - CHAT_MAX)
     this.chatListeners.forEach((fn) => fn())

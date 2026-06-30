@@ -4,8 +4,9 @@
 --
 -- Everything the deployed app needs: schema + RLS + realtime + lunch-menu seed
 -- + the `cast_vote` RPC and the unlimited `attack_language` combat RPC the
--- frontend calls directly. No Edge Function required. (Live chat needs no SQL —
--- it rides Realtime broadcast.)
+-- frontend calls directly. No Edge Function required. Chat is persisted for the
+-- current round in `messages` (written via the `post_message` RPC, delivered
+-- live over Realtime broadcast, and swept daily by roll_round_if_due).
 --
 -- Votes are stored in TENTHS: a vote is +10 (=1.0), an attack is −1 (=0.1).
 -- Safe to re-run; idempotent. (To re-theme an existing DB, run
@@ -160,6 +161,46 @@ $$;
 
 grant execute on function public.attack_language(text, int) to anon, authenticated;
 
+-- ---- chat: persisted for the current round (publicly readable) --------------
+-- Lives in `messages`; clients still get instant delivery via Realtime
+-- broadcast. roll_round_if_due() sweeps yesterday's lines each KST midnight.
+create table if not exists public.messages (
+  id         bigint generated always as identity primary key,
+  nick       text not null,
+  text       text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists messages_time_idx on public.messages (created_at desc);
+
+alter table public.messages enable row level security;
+drop policy if exists "messages readable by anyone" on public.messages;
+create policy "messages readable by anyone" on public.messages for select using (true);
+
+-- store a chat line (SECURITY DEFINER so it writes despite read-only RLS;
+-- trims/clamps like the client — 200 = chatPanel MAX_LEN).
+create or replace function public.post_message(p_nick text, p_text text)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n  text := nullif(btrim(p_nick), '');
+  t  text := nullif(btrim(p_text), '');
+  ts timestamptz;
+begin
+  if n is null or t is null then
+    return null;
+  end if;
+  insert into public.messages (nick, text)
+    values (left(n, 40), left(t, 200))
+    returning created_at into ts;
+  return ts;
+end;
+$$;
+
+grant execute on function public.post_message(text, text) to anon, authenticated;
+
 -- ---- daily rounds + hall of fame -------------------------------------------
 -- Every KST midnight the first visitor archives yesterday's #1 and resets every
 -- menu's total to its base_votes for a fresh lunch race.
@@ -210,6 +251,8 @@ begin
         on conflict (round_date) do nothing;
     end if;
     update public.languages set total_votes = base_votes;
+    -- fresh chat: keep only today's lines
+    delete from public.messages where (created_at at time zone 'Asia/Seoul')::date < today;
     update public.app_state set round_date = today where id = 1;
   end if;
   return today;
