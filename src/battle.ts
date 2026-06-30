@@ -32,6 +32,8 @@ interface Body {
   hitFlash: number
   /** lingering cracks from being smashed (0..1) */
   crack: number
+  /** squash-and-stretch jiggle on hit (0..1) */
+  wobble: number
   x: number
   cy: number
   r: number
@@ -108,7 +110,12 @@ export class BattleField {
   private hovered: string | null = null
   private firing: string | null = null
   private fireAccum = 0
-  private onAttack: ((slug: string) => void) | null = null
+  private combo = 0
+  private comboTimer = 0
+  private hitStop = 0
+  private prevLeader: string | null = null
+  private reduceMotion = false
+  private onAttack: ((slug: string, amount: number) => void) | null = null
   private unsub: (() => void)[] = []
   private canvas: HTMLCanvasElement
   private store: Store
@@ -119,6 +126,9 @@ export class BattleField {
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('2D canvas not supported')
     this.ctx = ctx
+    this.reduceMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
     const ro = new ResizeObserver(() => this.resize())
     ro.observe(canvas.parentElement ?? canvas)
@@ -187,8 +197,8 @@ export class BattleField {
     this.syncBodies()
   }
 
-  /** Register the handler invoked on each attack tick against an enemy planet. */
-  onAttackTarget(fn: (slug: string) => void) {
+  /** Register the handler invoked on each attack tick (slug, amount in tenths). */
+  onAttackTarget(fn: (slug: string, amount: number) => void) {
     this.onAttack = fn
   }
 
@@ -197,11 +207,21 @@ export class BattleField {
   private beginFire(pt: { x: number; y: number }): boolean {
     const b = this.bodyAt(pt.x, pt.y)
     if (!b || b.slug === this.store.getChampion()) return false
+    if (this.firing !== b.slug) this.combo = 0 // new target → fresh combo
     this.firing = b.slug
     this.fireAccum = 0
-    this.localHit(b.slug)
-    this.onAttack?.(b.slug)
+    this.fireTick(b.slug)
     return true
+  }
+
+  /** One attack tick: build the combo, scale the damage, play the local FX. */
+  private fireTick(slug: string) {
+    this.combo += 1
+    this.comboTimer = 0.8
+    const amount = comboDamage(this.combo)
+    if (!this.reduceMotion && this.combo % 10 === 0) this.hitStop = 0.05
+    this.localHit(slug, amount)
+    this.onAttack?.(slug, amount)
   }
 
   // arrow so it can be used directly as an event listener and unsubscribed
@@ -285,6 +305,7 @@ export class BattleField {
         bounce: 0,
         hitFlash: 0,
         crack: 0,
+        wobble: 0,
         x: 0,
         cy: 0,
         r: 16,
@@ -292,7 +313,42 @@ export class BattleField {
       }
     })
     this.bodies = next
+
+    // "역전!" — celebrate when the #1 menu changes hands
+    const leader = next[0]?.slug ?? null
+    if (leader && this.prevLeader && leader !== this.prevLeader) {
+      this.celebrateOvertake(next[0])
+    }
+    this.prevLeader = leader
+
     this.layout()
+  }
+
+  private celebrateOvertake(b: Body) {
+    this.shake = Math.min(12, this.shake + (this.reduceMotion ? 3 : 9))
+    this.floats.push({
+      x: this.w / 2,
+      y: this.h * 0.3,
+      vy: -18,
+      life: 1.8,
+      text: `역전! ${b.name} 1위`,
+      color: '#ffd34d',
+    })
+    const burst = this.reduceMotion ? 12 : 40
+    for (let i = 0; i < burst; i++) {
+      const a = Math.random() * Math.PI * 2
+      const sp = 60 + Math.random() * 160
+      this.particles.push({
+        x: this.w / 2,
+        y: this.h * 0.32,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 40,
+        life: 0.7 + Math.random() * 0.6,
+        color: i % 2 ? '#ffd34d' : '#fff',
+        size: 3 + Math.floor(Math.random() * 3),
+        grav: 1,
+      })
+    }
   }
 
   private layout() {
@@ -334,18 +390,23 @@ export class BattleField {
     }
   }
 
-  /** Local feedback for one of *my* auto-fire ticks (no data side effects). */
-  private localHit(slug: string) {
+  /** Local feedback for one of *my* auto-fire ticks (no data side effects).
+   * Intensity ramps with the combo. */
+  private localHit(slug: string, amount: number) {
     const b = this.bodies.find((bb) => bb.slug === slug)
     if (!b) return
+    const tier = Math.min(4, Math.floor(this.combo / 8)) // 0..4
+    const mo = this.reduceMotion ? 0.35 : 1
     b.hitFlash = Math.min(1, b.hitFlash + 0.6)
     b.crack = 1
-    this.shake = Math.min(7, this.shake + 1.4)
+    b.wobble = 1
+    this.shake = Math.min(12, this.shake + (1.2 + tier * 0.9) * mo)
     for (const c of b.creatures) if (Math.random() < 0.5) c.hit = 1
-    // gold coins + crumbs flying off
-    for (let i = 0; i < 4; i++) {
-      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2
-      const sp = 60 + Math.random() * 90
+    // gold coins + crumbs flying off — more, faster as the combo grows
+    const coins = 3 + tier * 2
+    for (let i = 0; i < coins; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4
+      const sp = 60 + Math.random() * (90 + tier * 40)
       this.particles.push({
         x: b.x + (Math.random() - 0.5) * b.r,
         y: b.cy,
@@ -353,7 +414,7 @@ export class BattleField {
         vy: Math.sin(a) * sp,
         life: 0.6 + Math.random() * 0.4,
         color: i % 2 ? '#ffd34d' : shade(b.color, 0.1),
-        size: 3 + Math.floor(Math.random() * 2),
+        size: 3 + Math.floor(Math.random() * (2 + tier)),
         grav: 1,
       })
     }
@@ -362,7 +423,7 @@ export class BattleField {
       y: b.cy - b.r,
       vy: -34,
       life: 0.6,
-      text: '−0.1',
+      text: `−${fmtVotes(amount)}`,
       color: '#ff6b8a',
       small: true,
     })
@@ -401,8 +462,10 @@ export class BattleField {
     if (!b) return
     b.hitFlash = 1
     b.crack = 1
+    b.wobble = 1
     const power = Math.min(3, 1 + im.amount / 5)
-    this.shake = Math.min(11, this.shake + 5 * power)
+    this.shake = Math.min(12, this.shake + 5 * power * (this.reduceMotion ? 0.35 : 1))
+    if (!this.reduceMotion) this.hitStop = 0.06
     for (const c of b.creatures) c.hit = 1
 
     this.rings.push({ x: b.x, y: b.cy, r: b.r * 0.6, life: 0.5, color: '#ffd34d' })
@@ -432,6 +495,12 @@ export class BattleField {
   }
 
   private update(dt: number) {
+    // hit-stop: a micro-freeze on big hits for extra punch
+    if (this.hitStop > 0) {
+      this.hitStop = Math.max(0, this.hitStop - dt)
+      return
+    }
+
     // auto-fire while a planet is held down
     if (this.firing) {
       const champ = this.store.getChampion()
@@ -442,10 +511,14 @@ export class BattleField {
         this.fireAccum += dt
         while (this.fireAccum >= FIRE_INTERVAL) {
           this.fireAccum -= FIRE_INTERVAL
-          this.localHit(this.firing)
-          this.onAttack?.(this.firing)
+          this.fireTick(this.firing)
         }
       }
+    }
+    // combo cools down shortly after you stop hitting
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt
+      if (this.comboTimer <= 0) this.combo = 0
     }
 
     const leaderVotes = this.bodies[0]?.votes ?? 1
@@ -454,6 +527,7 @@ export class BattleField {
       b.bounce = Math.max(0, b.bounce - dt * 3)
       b.hitFlash = Math.max(0, b.hitFlash - dt * 3)
       b.crack = Math.max(0, b.crack - dt * 1.2)
+      b.wobble = Math.max(0, b.wobble - dt * 4)
       b.bob += dt
       // ease the radius toward its target so growth/shrink is smooth
       const targetR = planetRadius(b.votes, leaderVotes, slot)
@@ -557,7 +631,27 @@ export class BattleField {
       ctx.fillText(f.text, f.x, f.y)
     }
     ctx.globalAlpha = 1
+
+    this.drawCombo(time)
     ctx.restore()
+  }
+
+  /** Big escalating "xN COMBO!" near the top while you keep hitting. */
+  private drawCombo(time: number) {
+    if (this.combo < 2) return
+    const ctx = this.ctx
+    const tier = Math.min(4, Math.floor(this.combo / 8))
+    const colors = ['#ffffff', '#ffe08a', '#ffd34d', '#ff9b3d', '#ff5a5a']
+    const size = 14 + tier * 4 + Math.min(8, this.combo * 0.15)
+    const jitter = this.reduceMotion ? 0 : tier
+    const cx = this.w / 2 + Math.sin(time * 40) * jitter
+    const cy = this.h * 0.16 + Math.cos(time * 37) * jitter
+    ctx.textAlign = 'center'
+    ctx.font = `${Math.round(size)}px "Press Start 2P", monospace`
+    ctx.fillStyle = '#0a0a12'
+    ctx.fillText(`x${this.combo} COMBO!`, cx + 2, cy + 2)
+    ctx.fillStyle = colors[tier]
+    ctx.fillText(`x${this.combo} COMBO!`, cx, cy)
   }
 
   private drawBackground(time: number) {
@@ -604,6 +698,12 @@ export class BattleField {
       drawCreature(ctx, b, c, cx, cy, r, time)
     }
 
+    // squash-and-stretch on hit (wraps body + face only)
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.scale(1 + b.wobble * 0.2, 1 - b.wobble * 0.2)
+    ctx.translate(-cx, -cy)
+
     // planet body
     ctx.fillStyle = shade(b.color, -0.5)
     ctx.beginPath()
@@ -632,35 +732,59 @@ export class BattleField {
       ctx.stroke()
     }
 
-    // cute face
+    // cute face — reacts to being smashed / losing
+    const leaderVotes = this.bodies[0]?.votes ?? 1
+    const low = leaderVotes > 0 && b.votes / leaderVotes < 0.25
+    const ouch = b.hitFlash > 0.3
     const eyeY = cy - r * 0.08
     const ex = r * 0.36
     ctx.fillStyle = '#1a1024'
-    const blink = Math.sin(time * 1.7 + b.bob) > 0.96
-    if (blink) {
-      ctx.fillRect(cx - ex - 2, eyeY, 4, 1)
-      ctx.fillRect(cx + ex - 2, eyeY, 4, 1)
+    if (b.hitFlash > 0.55) {
+      // dizzy "x x" eyes while getting hammered
+      ctx.strokeStyle = '#1a1024'
+      ctx.lineWidth = 1.5
+      for (const sgn of [-1, 1]) {
+        const ox = cx + sgn * ex
+        ctx.beginPath()
+        ctx.moveTo(ox - 2, eyeY - 2)
+        ctx.lineTo(ox + 2, eyeY + 2)
+        ctx.moveTo(ox + 2, eyeY - 2)
+        ctx.lineTo(ox - 2, eyeY + 2)
+        ctx.stroke()
+      }
     } else {
-      ctx.beginPath()
-      ctx.arc(cx - ex, eyeY, Math.max(1.5, r * 0.09), 0, Math.PI * 2)
-      ctx.arc(cx + ex, eyeY, Math.max(1.5, r * 0.09), 0, Math.PI * 2)
-      ctx.fill()
-      // sparkle
-      ctx.fillStyle = '#fff'
-      ctx.fillRect(Math.round(cx - ex - 1), Math.round(eyeY - 1), 1, 1)
-      ctx.fillRect(Math.round(cx + ex - 1), Math.round(eyeY - 1), 1, 1)
+      const blink = Math.sin(time * 1.7 + b.bob) > 0.96
+      if (blink) {
+        ctx.fillRect(cx - ex - 2, eyeY, 4, 1)
+        ctx.fillRect(cx + ex - 2, eyeY, 4, 1)
+      } else {
+        ctx.beginPath()
+        ctx.arc(cx - ex, eyeY, Math.max(1.5, r * 0.09), 0, Math.PI * 2)
+        ctx.arc(cx + ex, eyeY, Math.max(1.5, r * 0.09), 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(Math.round(cx - ex - 1), Math.round(eyeY - 1), 1, 1)
+        ctx.fillRect(Math.round(cx + ex - 1), Math.round(eyeY - 1), 1, 1)
+      }
     }
-    // mouth: a smile, or an "ouch" when hit
+    // mouth: smile / "ouch" O / worried frown when losing
     ctx.strokeStyle = '#1a1024'
     ctx.lineWidth = 1.5
     ctx.beginPath()
     const my = cy + r * 0.28
-    if (b.hitFlash > 0.3) {
-      ctx.arc(cx, my + r * 0.12, r * 0.16, Math.PI, Math.PI * 2) // open "o" frown
+    if (ouch) {
+      ctx.arc(cx, my + r * 0.12, r * 0.16, Math.PI, Math.PI * 2) // open "o"
+    } else if (low) {
+      ctx.arc(cx, my + r * 0.22, r * 0.18, 1.2 * Math.PI, 1.8 * Math.PI) // frown
     } else {
-      ctx.arc(cx, my - r * 0.1, r * 0.2, 0.15 * Math.PI, 0.85 * Math.PI)
+      ctx.arc(cx, my - r * 0.1, r * 0.2, 0.15 * Math.PI, 0.85 * Math.PI) // smile
     }
     ctx.stroke()
+    // a worried sweat drop when losing badly (and not mid-hit)
+    if (low && !ouch) {
+      ctx.fillStyle = '#7fd3ff'
+      ctx.fillRect(Math.round(cx + ex + 2), Math.round(eyeY - 1), 2, 3)
+    }
 
     // red hit tint
     if (b.hitFlash > 0) {
@@ -671,6 +795,7 @@ export class BattleField {
       ctx.fill()
       ctx.globalAlpha = 1
     }
+    ctx.restore()
 
     // orbiting creatures in front
     for (const c of b.creatures) {
@@ -726,6 +851,11 @@ export class BattleField {
 function creatureTarget(lang: Language, leaderVotes: number): number {
   if (leaderVotes <= 0) return 1
   return Math.max(1, Math.round((lang.votes / leaderVotes) * MAX_CREATURES))
+}
+
+/** Damage per attack tick (tenths). Ramps with the combo: 0.1 → 0.5. */
+function comboDamage(combo: number): number {
+  return 1 + Math.min(4, Math.floor(combo / 8))
 }
 
 function planetRadius(votes: number, leaderVotes: number, slot: number): number {

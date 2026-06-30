@@ -66,6 +66,20 @@ export class DemoBackend implements Backend {
     // optimistically, so there is nothing to broadcast here.
   }
 
+  subscribePresence(onCount: (n: number) => void): () => void {
+    // No real peers in demo mode — fake a small, gently wandering crowd.
+    let n = 3
+    let tick = 0
+    onCount(n)
+    const timer = setInterval(() => {
+      tick++
+      const step = ((tick * 1103515245 + 12345) >> 8) % 3 // 0,1,2 → -1,0,+1
+      n = Math.max(1, Math.min(6, n + (step - 1)))
+      onCount(n)
+    }, 4000)
+    return () => clearInterval(timer)
+  }
+
   private snapshot(): Language[] {
     return this.langs.map((l) => ({ ...l }))
   }

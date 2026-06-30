@@ -142,6 +142,21 @@ export class SupabaseBackend implements Backend {
     this.joinArena().send({ type: 'broadcast', event: 'chat', payload: m })
   }
 
+  subscribePresence(onCount: (n: number) => void): () => void {
+    // A dedicated presence channel; each connected client tracks itself, so the
+    // number of presence keys is the live player count.
+    const channel = this.client.channel('lobby')
+    channel.on('presence', { event: 'sync' }, () => {
+      onCount(Object.keys(channel.presenceState()).length)
+    })
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') void channel.track({ at: 0 })
+    })
+    return () => {
+      void this.client.removeChannel(channel)
+    }
+  }
+
   /** The shared ephemeral broadcast channel (created once, not yet subscribed). */
   private getArena(): RealtimeChannel {
     if (!this.arenaChannel) {

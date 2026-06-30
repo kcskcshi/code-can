@@ -18,6 +18,7 @@ async function boot() {
 
   // --- layout ---------------------------------------------------------------
   const modeBadge = el('span', { class: 'mode-badge', text: '...' })
+  const presenceBadge = el('span', { class: 'presence-badge', text: '🟢 …' })
   const canvas = el('canvas', { class: 'battle-canvas' })
   const battleWrap = el('section', { class: 'battlefield' }, [canvas])
   const hud = el('section', { class: 'hud-bar' })
@@ -31,6 +32,7 @@ async function boot() {
       el('div', { class: 'brand' }, [
         el('h1', { class: 'logo', text: 'LUNCH WARS' }),
         modeBadge,
+        presenceBadge,
       ]),
       el('p', {
         class: 'tagline',
@@ -66,6 +68,11 @@ async function boot() {
       ? 'Supabase 실시간 연결됨'
       : 'Supabase 미설정 — 로컬 시뮬레이션 모드 (README 참고)'
 
+  // live player count in the header
+  backend.subscribePresence((n) => {
+    presenceBadge.textContent = `🟢 ${n}명 전쟁 중`
+  })
+
   // stream remote votes/attacks into the store
   backend.subscribe((e) => store.applyVote(e, false))
   // stream ephemeral chat + assault animations from the arena channel
@@ -82,8 +89,8 @@ async function boot() {
   mountChatPanel(colChat, store, backend)
 
   const battle = new BattleField(canvas, store)
-  // press-and-hold an enemy planet on the field → auto-fire attacks
-  battle.onAttackTarget((slug) => combat.onAttack(slug))
+  // press-and-hold an enemy planet on the field → auto-fire attacks (combo ramps damage)
+  battle.onAttackTarget((slug, amount) => combat.onAttack(slug, amount))
   battle.start()
 }
 

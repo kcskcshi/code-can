@@ -6,8 +6,9 @@ import { fmtVotes } from './format'
 const FLUSH_MS = 300 // batch rapid auto-fire ticks into one network call
 
 export interface CombatController {
-  /** Called on every auto-fire tick from the canvas (press-and-hold an enemy). */
-  onAttack(target: string): void
+  /** Called on every auto-fire tick from the canvas (press-and-hold an enemy).
+   * `amount` is the damage in tenths for this tick (ramps with the combo). */
+  onAttack(target: string, amount: number): void
 }
 
 /**
@@ -85,13 +86,13 @@ export function mountCombatHud(
 
   window.setInterval(flush, FLUSH_MS)
 
-  function onAttack(target: string) {
+  function onAttack(target: string, amount: number) {
     const champion = store.getChampion()
     if (!champion || champion === target) return
     // switching targets mid-stream: flush the previous one first
     if (pendingSlug && pendingSlug !== target && pendingAmt > 0) void flush()
     pendingSlug = target
-    pendingAmt += 1
+    pendingAmt += Math.max(1, amount)
   }
 
   const renderChampion = rafThrottle(() => {

@@ -82,6 +82,15 @@ body {
   color: var(--accent);
   border-color: #6b552c;
 }
+.presence-badge {
+  font-family: var(--pixel);
+  font-size: 9px;
+  padding: 6px 8px;
+  border: 2px solid #2c6b4a;
+  border-radius: 4px;
+  color: var(--good);
+  white-space: nowrap;
+}
 
 /* ---------- battlefield ---------- */
 .battlefield {

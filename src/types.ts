@@ -89,4 +89,6 @@ export interface Backend {
   subscribeArena(handlers: ArenaHandlers): () => void
   /** Broadcast a chat message (fire-and-forget; never persisted). */
   sendChat(m: ChatMessage): void
+  /** Subscribe to the live count of connected players. */
+  subscribePresence(onCount: (n: number) => void): () => void
 }
