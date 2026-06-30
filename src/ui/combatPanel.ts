@@ -6,15 +6,16 @@ import { fmtVotes } from './format'
 const FLUSH_MS = 300 // batch rapid auto-fire ticks into one network call
 
 export interface CombatController {
-  /** Called on every auto-fire tick from the canvas (press-and-hold an enemy).
-   * `amount` is the damage in tenths for this tick (ramps with the combo). */
+  /** Hold a rival planet → attack tick. `amount` is tenths (ramps with combo). */
   onAttack(target: string, amount: number): void
+  /** Hold your own planet → vote tick. `amount` is tenths (ramps with combo). */
+  onVote(target: string, amount: number): void
 }
 
 /**
- * Combat HUD: pick your champion, then press-and-hold an enemy planet on the
- * battlefield to smash it. Attacking is unlimited; rapid ticks are batched into
- * one network call every FLUSH_MS to keep the server happy.
+ * Combat HUD: pick your menu, then press-and-hold planets on the battlefield —
+ * your own to grow it (vote), a rival to smash it (attack). Both are unlimited;
+ * rapid ticks are batched into one network call every FLUSH_MS.
  */
 export function mountCombatHud(
   root: HTMLElement,
@@ -27,7 +28,7 @@ export function mountCombatHud(
   }) as HTMLSelectElement
   const status = el('p', {
     class: 'combat-status',
-    text: '적 행성을 꾹 눌러 공격! 투표 +1.0 / 공격 −0.1 · 무제한',
+    text: '내 행성=꾹 눌러 키우기(+) · 적 행성=꾹 눌러 부수기(−) · 무제한',
   })
 
   root.append(
@@ -84,7 +85,37 @@ export function mountCombatHud(
     }
   }
 
-  window.setInterval(flush, FLUSH_MS)
+  // pending votes (tenths) for your own planet, flushed the same way
+  let pendingVoteSlug: string | null = null
+  let pendingVoteAmt = 0
+  let flushingVote = false
+
+  async function flushVote() {
+    if (flushingVote || pendingVoteAmt <= 0 || !pendingVoteSlug) return
+    const target = pendingVoteSlug
+    const amount = pendingVoteAmt
+    pendingVoteAmt = 0
+    flushingVote = true
+    try {
+      const res = await backend.vote(target, null, amount)
+      if (res.ok) {
+        store.applyVote({ slug: target, total: res.total, amount, kind: 'vote' }, true)
+        const name = store.get(target)?.name ?? target
+        setStatus(`${name} 키우는 중! 🍽 (현재 ${fmtVotes(res.total)})`, 'ok')
+      } else {
+        setStatus(`투표 실패: ${res.error}`, 'err')
+      }
+    } catch {
+      setStatus('투표 실패: 네트워크 오류', 'err')
+    } finally {
+      flushingVote = false
+    }
+  }
+
+  window.setInterval(() => {
+    void flush()
+    void flushVote()
+  }, FLUSH_MS)
 
   function onAttack(target: string, amount: number) {
     const champion = store.getChampion()
@@ -93,6 +124,12 @@ export function mountCombatHud(
     if (pendingSlug && pendingSlug !== target && pendingAmt > 0) void flush()
     pendingSlug = target
     pendingAmt += Math.max(1, amount)
+  }
+
+  function onVote(target: string, amount: number) {
+    if (pendingVoteSlug && pendingVoteSlug !== target && pendingVoteAmt > 0) void flushVote()
+    pendingVoteSlug = target
+    pendingVoteAmt += Math.max(1, amount)
   }
 
   const renderChampion = rafThrottle(() => {
@@ -110,5 +147,5 @@ export function mountCombatHud(
   store.onChampionChange(renderChampion)
   renderChampion()
 
-  return { onAttack }
+  return { onAttack, onVote }
 }

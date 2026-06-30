@@ -74,8 +74,9 @@ export interface Backend {
   load(): Promise<Language[]>
   /** Subscribe to live vote/attack updates. Returns an unsubscribe function. */
   subscribe(onVote: (e: VoteEvent) => void): () => void
-  /** Cast a vote for a language. */
-  vote(slug: string, turnstileToken: string | null): Promise<VoteResult>
+  /** Cast `amount` tenths of a vote for a menu (default 10 = 1.0). `amount`
+   * lets the client batch rapid hold-to-vote ticks into one call. */
+  vote(slug: string, turnstileToken: string | null, amount?: number): Promise<VoteResult>
   /** Attack a rival, removing `amount` tenths of its votes (default 1 = 0.1).
    * Returns the rival's new total. `champion` is the attacker (for the assault
    * animation). `amount` lets the client batch rapid auto-fire into one call. */

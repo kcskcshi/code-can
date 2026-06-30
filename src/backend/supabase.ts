@@ -74,17 +74,21 @@ export class SupabaseBackend implements Backend {
     }
   }
 
-  async vote(slug: string, _turnstileToken: string | null): Promise<VoteResult> {
-    // Votes go through the SECURITY DEFINER `cast_vote` RPC, which derives the
-    // client IP server-side and rate-limits in the database. (RLS still blocks
-    // any direct write to the tables.)
-    const { data, error } = await this.client.rpc('cast_vote', { p_slug: slug })
+  async vote(
+    slug: string,
+    _turnstileToken: string | null,
+    amount = 10,
+  ): Promise<VoteResult> {
+    // Votes go through the SECURITY DEFINER `cast_vote` RPC. Unlimited (no rate
+    // limit) so hold-to-vote matches hold-to-attack. RLS still blocks direct
+    // writes to the tables.
+    const { data, error } = await this.client.rpc('cast_vote', {
+      p_slug: slug,
+      p_amount: amount,
+    })
     if (error) {
-      if (error.message?.includes('rate_limited')) {
-        return { ok: false, error: 'too many votes, slow down', retryAfter: 10 }
-      }
-      if (error.message?.includes('unknown language')) {
-        return { ok: false, error: 'unknown language' }
+      if (error.message?.includes('unknown menu')) {
+        return { ok: false, error: 'unknown menu' }
       }
       return { ok: false, error: error.message ?? 'vote failed' }
     }

@@ -7,7 +7,6 @@ import { DemoBackend } from './backend/demo'
 import { SupabaseBackend } from './backend/supabase'
 import { mountLeaderboard } from './ui/leaderboard'
 import { mountVotePanel } from './ui/votePanel'
-import { mountLiveFeed } from './ui/liveFeed'
 import { mountCombatHud } from './ui/combatPanel'
 import { mountChatPanel } from './ui/chatPanel'
 import { el } from './ui/dom'
@@ -24,7 +23,6 @@ async function boot() {
   const hud = el('section', { class: 'hud-bar' })
   const colVote = el('div', { class: 'col col-vote' })
   const colStand = el('div', { class: 'col col-stand' })
-  const colFeed = el('div', { class: 'col col-feed' })
   const colChat = el('div', { class: 'col col-chat' })
 
   app.append(
@@ -41,7 +39,7 @@ async function boot() {
     ]),
     battleWrap,
     hud,
-    el('main', { class: 'grid' }, [colVote, colStand, colFeed, colChat]),
+    el('main', { class: 'grid' }, [colVote, colStand, colChat]),
     el('footer', { class: 'site-footer' }, [
       el('p', {
         text: '스페인 길거리에서 여행자들이 "가장 위대한 점심 메뉴"를 묻는 깡통 투표로 여비를 벌던 일화에서 출발했습니다.',
@@ -85,12 +83,12 @@ async function boot() {
   const combat = mountCombatHud(hud, store, backend)
   mountVotePanel(colVote, store, backend)
   mountLeaderboard(colStand, store)
-  mountLiveFeed(colFeed, store)
   mountChatPanel(colChat, store, backend)
 
   const battle = new BattleField(canvas, store)
-  // press-and-hold an enemy planet on the field → auto-fire attacks (combo ramps damage)
+  // hold your own planet → vote (+), hold a rival → attack (−); combo ramps both
   battle.onAttackTarget((slug, amount) => combat.onAttack(slug, amount))
+  battle.onVoteTarget((slug, amount) => combat.onVote(slug, amount))
   battle.start()
 }
 

@@ -87,52 +87,32 @@ insert into public.languages (slug, name, tag, color, total_votes) values
   ('jeyuk','제육덮밥','제육','#cf4633',420)
 on conflict (slug) do nothing;
 
--- ---- anon-callable voting with in-database rate limiting --------------------
--- SECURITY DEFINER so it can write despite RLS; the client IP is read from the
--- gateway-supplied request headers server-side (never trusted from the client).
-create or replace function public.cast_vote(p_slug text)
+-- ---- voting: UNLIMITED, adds p_amount tenths (default 10 = 1.0) -------------
+-- Symmetric with attack_language so hold-to-grow keeps pace with hold-to-smash.
+-- SECURITY DEFINER so it can write despite RLS.
+drop function if exists public.cast_vote(text);
+create or replace function public.cast_vote(p_slug text, p_amount int default 10)
 returns bigint
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_ip     text;
-  v_hash   text;
-  v_recent int;
   new_total bigint;
+  amt int := greatest(1, least(100, coalesce(p_amount, 10)));
 begin
-  v_ip := split_part(
-    coalesce(
-      nullif(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''),
-      current_setting('request.headers', true)::json ->> 'cf-connecting-ip',
-      'local'
-    ), ',', 1);
-  v_hash := md5('code-can:' || v_ip);
-
-  -- rate limit: at most 5 votes per 10 seconds per IP
-  select count(*) into v_recent
-    from public.vote_log
-   where ip_hash = v_hash
-     and created_at > now() - interval '10 seconds';
-  if v_recent >= 5 then
-    raise exception 'rate_limited' using errcode = 'check_violation';
-  end if;
-
   update public.languages
-     set total_votes = total_votes + 10
+     set total_votes = total_votes + amt
    where slug = p_slug
    returning total_votes into new_total;
   if new_total is null then
     raise exception 'unknown menu: %', p_slug using errcode = 'no_data_found';
   end if;
-
-  insert into public.vote_log (language_slug, ip_hash) values (p_slug, v_hash);
   return new_total;
 end;
 $$;
 
-grant execute on function public.cast_vote(text) to anon, authenticated;
+grant execute on function public.cast_vote(text, int) to anon, authenticated;
 
 -- ---- combat: UNLIMITED attack that removes p_amount tenths (default 1=0.1) ---
 -- No rate limit (attacking is meant to be spammed), so no attack_log needed.

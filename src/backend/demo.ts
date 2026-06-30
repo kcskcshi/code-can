@@ -38,11 +38,11 @@ export class DemoBackend implements Backend {
     return () => this.listeners.delete(onVote)
   }
 
-  async vote(slug: string): Promise<VoteResult> {
+  async vote(slug: string, _token: string | null, amount = VOTE_GAIN): Promise<VoteResult> {
     const lang = this.langs.find((l) => l.slug === slug)
     if (!lang) return { ok: false, error: 'unknown menu' }
-    lang.votes += VOTE_GAIN
-    this.emit({ slug, total: lang.votes, amount: VOTE_GAIN, kind: 'vote' })
+    lang.votes += amount
+    this.emit({ slug, total: lang.votes, amount, kind: 'vote' })
     return { ok: true, total: lang.votes }
   }
 

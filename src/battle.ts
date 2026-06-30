@@ -1,7 +1,8 @@
 import type { Store } from './store'
 import type { Language } from './types'
 import { BATTLE_SQUADS } from './config'
-import { fmtVotes } from './ui/format'
+import { LANGUAGE_BY_SLUG } from './languages'
+import { fmtVotes, fmtDelta } from './ui/format'
 
 /** A cute little eater orbiting a menu planet (Walkr-ish ambient life). */
 interface Creature {
@@ -89,6 +90,16 @@ interface Impact {
   delay: number
 }
 
+/** A faint event line that floats up behind the planets (the "ticker" log). */
+interface LogLine {
+  text: string
+  color: string
+  x: number
+  y: number
+  vy: number
+  life: number
+}
+
 const MAX_CREATURES = 10
 const RAID_DUR = 0.5
 const FIRE_INTERVAL = 0.1 // seconds between auto-fire ticks while held
@@ -101,6 +112,7 @@ export class BattleField {
   private raiders: Raider[] = []
   private impacts: Impact[] = []
   private rings: Ring[] = []
+  private logLines: LogLine[] = []
   private w = 0
   private h = 0
   private dpr = 1
@@ -116,6 +128,7 @@ export class BattleField {
   private prevLeader: string | null = null
   private reduceMotion = false
   private onAttack: ((slug: string, amount: number) => void) | null = null
+  private onVote: ((slug: string, amount: number) => void) | null = null
   private unsub: (() => void)[] = []
   private canvas: HTMLCanvasElement
   private store: Store
@@ -135,10 +148,13 @@ export class BattleField {
     this.unsub.push(() => ro.disconnect())
 
     this.unsub.push(this.store.onChange(() => this.syncBodies()))
-    // Votes drive the cheer FX; attacks are visualised by the assault stream.
+    // Every vote/attack (local or remote) feeds the background ticker; votes
+    // additionally pop a little cheer.
     this.unsub.push(
       this.store.onFx((e) => {
-        if ((e.kind ?? 'vote') === 'vote') this.onVote(e.slug, e.self)
+        const kind = e.kind ?? 'vote'
+        this.pushLog(e.slug, e.amount, kind)
+        if (kind === 'vote') this.cheer(e.slug, e.self)
       }),
     )
     this.unsub.push(this.store.onAssault((a) => this.onAssault(a)))
@@ -153,8 +169,8 @@ export class BattleField {
       this.canvas.style.cursor = !b
         ? 'default'
         : b.slug === champ
-          ? 'not-allowed'
-          : 'crosshair'
+          ? 'pointer' // your planet — hold to vote
+          : 'crosshair' // rival — hold to attack
     }
     const onMouseDown = (e: MouseEvent) => this.beginFire(this.toCanvas(e))
     const onMouseLeave = () => {
@@ -202,11 +218,17 @@ export class BattleField {
     this.onAttack = fn
   }
 
+  /** Register the handler invoked on each vote tick (holding your own planet). */
+  onVoteTarget(fn: (slug: string, amount: number) => void) {
+    this.onVote = fn
+  }
+
   /** Start auto-firing at the planet under a pointer. Returns false if it was
-   * empty space or your own planet. Fires one tick immediately. */
+   * empty space. Holding your champion votes (+), any other planet attacks (−).
+   * Fires one tick immediately. */
   private beginFire(pt: { x: number; y: number }): boolean {
     const b = this.bodyAt(pt.x, pt.y)
-    if (!b || b.slug === this.store.getChampion()) return false
+    if (!b) return false
     if (this.firing !== b.slug) this.combo = 0 // new target → fresh combo
     this.firing = b.slug
     this.fireAccum = 0
@@ -214,14 +236,20 @@ export class BattleField {
     return true
   }
 
-  /** One attack tick: build the combo, scale the damage, play the local FX. */
+  /** One tick: build the combo, scale the amount, play the local FX. Holding
+   * your own planet grows it (vote); any rival shrinks (attack). */
   private fireTick(slug: string) {
     this.combo += 1
     this.comboTimer = 0.8
     const amount = comboDamage(this.combo)
     if (!this.reduceMotion && this.combo % 10 === 0) this.hitStop = 0.05
-    this.localHit(slug, amount)
-    this.onAttack?.(slug, amount)
+    if (slug === this.store.getChampion()) {
+      this.localVoteHit(slug, amount)
+      this.onVote?.(slug, amount)
+    } else {
+      this.localHit(slug, amount)
+      this.onAttack?.(slug, amount)
+    }
   }
 
   // arrow so it can be used directly as an event listener and unsubscribed
@@ -362,7 +390,24 @@ export class BattleField {
     })
   }
 
-  private onVote(slug: string, self: boolean) {
+  /** Append a faint line to the background ticker log. */
+  private pushLog(slug: string, amount: number, kind: 'vote' | 'attack') {
+    const meta = LANGUAGE_BY_SLUG[slug]
+    const name = meta?.name ?? this.store.get(slug)?.name ?? slug
+    const emoji = meta?.emoji ?? '🍽'
+    const delta = fmtDelta(kind === 'attack' ? -amount : amount)
+    this.logLines.push({
+      text: `${emoji} ${name} ${delta}`,
+      color: kind === 'attack' ? '#a83b52' : '#4f9e57',
+      x: 16,
+      y: this.h * 0.72,
+      vy: -12,
+      life: 3.5,
+    })
+    if (this.logLines.length > 18) this.logLines.shift()
+  }
+
+  private cheer(slug: string, self: boolean) {
     const b = this.bodies.find((bb) => bb.slug === slug)
     if (!b) return
     b.bounce = 1
@@ -425,6 +470,39 @@ export class BattleField {
       life: 0.6,
       text: `−${fmtVotes(amount)}`,
       color: '#ff6b8a',
+      small: true,
+    })
+  }
+
+  /** Local feedback for one of *my* vote ticks (holding your own planet). */
+  private localVoteHit(slug: string, amount: number) {
+    const b = this.bodies.find((bb) => bb.slug === slug)
+    if (!b) return
+    const tier = Math.min(4, Math.floor(this.combo / 8))
+    b.bounce = Math.min(1, b.bounce + 0.5)
+    // rising green/gold sparkles instead of falling coins
+    const sparks = 3 + tier * 2
+    for (let i = 0; i < sparks; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6
+      const sp = 40 + Math.random() * (60 + tier * 30)
+      this.particles.push({
+        x: b.x + (Math.random() - 0.5) * b.r,
+        y: b.cy,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0.6 + Math.random() * 0.4,
+        color: i % 2 ? '#5cff9d' : '#fff7c2',
+        size: 3 + Math.floor(Math.random() * (1 + tier)),
+        grav: -0.3, // drift up
+      })
+    }
+    this.floats.push({
+      x: b.x + (Math.random() - 0.5) * b.r,
+      y: b.cy - b.r,
+      vy: -34,
+      life: 0.6,
+      text: `+${fmtVotes(amount)}`,
+      color: '#5cff9d',
       small: true,
     })
   }
@@ -501,11 +579,10 @@ export class BattleField {
       return
     }
 
-    // auto-fire while a planet is held down
+    // auto-fire while a planet is held down (champion = vote, rival = attack)
     if (this.firing) {
-      const champ = this.store.getChampion()
       const stillThere = this.bodies.some((b) => b.slug === this.firing)
-      if (!stillThere || this.firing === champ) {
+      if (!stillThere) {
         this.firing = null
       } else {
         this.fireAccum += dt
@@ -582,6 +659,9 @@ export class BattleField {
     this.shake = Math.max(0, this.shake - dt * 24)
     this.rings = this.rings.filter((r) => (r.life -= dt) > 0)
     for (const r of this.rings) r.r += dt * 240
+
+    this.logLines = this.logLines.filter((l) => (l.life -= dt) > 0)
+    for (const l of this.logLines) l.y += l.vy * dt
   }
 
   private draw(time: number) {
@@ -594,6 +674,7 @@ export class BattleField {
       ctx.translate(Math.round(Math.sin(time * 91) * k), Math.round(Math.cos(time * 73) * k))
     }
     this.drawBackground(time)
+    this.drawLog()
 
     const champion = this.store.getChampion()
     for (const b of this.bodies) this.drawBody(b, time, champion)
@@ -652,6 +733,19 @@ export class BattleField {
     ctx.fillText(`x${this.combo} COMBO!`, cx + 2, cy + 2)
     ctx.fillStyle = colors[tier]
     ctx.fillText(`x${this.combo} COMBO!`, cx, cy)
+  }
+
+  /** Faint rising "ticker" of recent votes/attacks, drawn behind the planets. */
+  private drawLog() {
+    const ctx = this.ctx
+    ctx.textAlign = 'left'
+    ctx.font = '8px "Press Start 2P", monospace'
+    for (const l of this.logLines) {
+      ctx.globalAlpha = Math.max(0, Math.min(0.22, l.life * 0.12))
+      ctx.fillStyle = l.color
+      ctx.fillText(l.text, l.x, l.y)
+    }
+    ctx.globalAlpha = 1
   }
 
   private drawBackground(time: number) {
@@ -803,13 +897,19 @@ export class BattleField {
       drawCreature(ctx, b, c, cx, cy, r, time)
     }
 
-    // selection / target ring
+    // selection / target ring — your planet (gold, vote) vs a rival (red, attack)
+    ctx.textAlign = 'center'
     if (b.slug === champion) {
       ctx.strokeStyle = '#ffd34d'
       ctx.lineWidth = 2.5
       ctx.beginPath()
       ctx.arc(cx, cy, r + 6, 0, Math.PI * 2)
       ctx.stroke()
+      if (b.slug === this.hovered) {
+        ctx.font = '8px "Press Start 2P", monospace'
+        ctx.fillStyle = '#5cff9d'
+        ctx.fillText('꾹! 투표 +', cx, cy - r - 18)
+      }
     } else if (b.slug === this.hovered) {
       ctx.strokeStyle = '#ff6b8a'
       ctx.lineWidth = 2.5
@@ -818,7 +918,7 @@ export class BattleField {
       ctx.stroke()
       ctx.font = '8px "Press Start 2P", monospace'
       ctx.fillStyle = '#ff6b8a'
-      ctx.fillText('공격!', cx, cy - r - 18)
+      ctx.fillText('꾹! 공격 −', cx, cy - r - 18)
     }
 
     // emoji badge above the planet

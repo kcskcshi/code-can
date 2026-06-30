@@ -7,10 +7,14 @@ import { Turnstile } from './turnstile'
 const COOLDOWN_MS = 1500
 const VOTE_GAIN = 10 // a vote is +1.0 (10 tenths)
 
-/** The voting booth: search box, a button per language, Turnstile, status line. */
+/** Menu picker: search + a button per menu. Clicking sets it as YOUR menu
+ * (champion) and casts one vote — then hold that planet on the field to grow it. */
 export function mountVotePanel(root: HTMLElement, store: Store, backend: Backend): void {
   const turnstile = new Turnstile()
-  const status = el('p', { class: 'vote-status', text: '오늘 점심 메뉴에 한 표! 🍽' })
+  const status = el('p', {
+    class: 'vote-status',
+    text: '메뉴를 골라 내 편으로! 그 다음 전장에서 내 행성을 꾹 눌러 키워요 🍽',
+  })
   const tsBox = el('div', { class: 'turnstile-box' })
   const search = el('input', {
     class: 'vote-search',
@@ -22,7 +26,7 @@ export function mountVotePanel(root: HTMLElement, store: Store, backend: Backend
 
   root.append(
     el('div', { class: 'panel' }, [
-      el('h2', { class: 'panel-title', text: '🗳 투표 (Cast your vote)' }),
+      el('h2', { class: 'panel-title', text: '🍽 메뉴 고르기 (Pick your menu)' }),
       search,
       grid,
       tsBox,
@@ -50,13 +54,15 @@ export function mountVotePanel(root: HTMLElement, store: Store, backend: Backend
     const btn = buttons.get(slug)
     btn?.setAttribute('disabled', '')
 
-    const res = await backend.vote(slug, turnstile.token())
+    // picking a menu makes it your champion (the one you grow on the field)
+    store.setChampion(slug)
+    const res = await backend.vote(slug, turnstile.token(), VOTE_GAIN)
     turnstile.consume()
 
     if (res.ok) {
       store.applyVote({ slug, total: res.total, amount: VOTE_GAIN, kind: 'vote' }, true)
       const name = store.get(slug)?.name ?? slug
-      setStatus(`${name}에 투표 완료! 🍽 (총 ${fmtVotes(res.total)}표)`, 'ok')
+      setStatus(`${name} 내 편! 🍽 전장에서 꾹 눌러 키워요 (현재 ${fmtVotes(res.total)})`, 'ok')
     } else {
       cooldownUntil = res.retryAfter ? now + res.retryAfter * 1000 : cooldownUntil
       setStatus(
