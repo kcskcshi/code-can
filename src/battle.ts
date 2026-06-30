@@ -47,6 +47,17 @@ interface Particle {
   vy: number
   life: number
   color: string
+  /** pixel size (default 3); debris from a smashed army is chunkier */
+  size?: number
+}
+
+/** Expanding shockwave ring drawn on a heavy hit. */
+interface Ring {
+  x: number
+  y: number
+  r: number
+  life: number
+  color: string
 }
 
 /** A soldier charging from the attacking army toward a defender (invasion FX). */
@@ -80,11 +91,15 @@ export class BattleField {
   private particles: Particle[] = []
   private raiders: Raider[] = []
   private impacts: Impact[] = []
+  private rings: Ring[] = []
   private w = 0
   private h = 0
   private dpr = 1
   private last = 0
   private raf = 0
+  private shake = 0
+  private hovered: string | null = null
+  private onAttack: ((slug: string) => void) | null = null
   private unsub: (() => void)[] = []
   private canvas: HTMLCanvasElement
   private store: Store
@@ -109,8 +124,70 @@ export class BattleField {
     )
     this.unsub.push(this.store.onAssault((a) => this.onAssault(a)))
 
+    // Click an enemy army on the field to attack it; hover highlights the target.
+    const onMove = (e: MouseEvent) => {
+      const { x, y } = this.toCanvas(e)
+      const s = this.squadAt(x, y)
+      this.hovered = s?.slug ?? null
+      const champ = this.store.getChampion()
+      this.canvas.style.cursor = !s
+        ? 'default'
+        : s.slug === champ
+          ? 'not-allowed'
+          : 'crosshair'
+    }
+    const onLeave = () => {
+      this.hovered = null
+      this.canvas.style.cursor = 'default'
+    }
+    const onClick = (e: MouseEvent) => {
+      const { x, y } = this.toCanvas(e)
+      const s = this.squadAt(x, y)
+      if (!s) return
+      if (s.slug === this.store.getChampion()) return
+      this.onAttack?.(s.slug)
+    }
+    this.canvas.addEventListener('mousemove', onMove)
+    this.canvas.addEventListener('mouseleave', onLeave)
+    this.canvas.addEventListener('click', onClick)
+    this.unsub.push(() => {
+      this.canvas.removeEventListener('mousemove', onMove)
+      this.canvas.removeEventListener('mouseleave', onLeave)
+      this.canvas.removeEventListener('click', onClick)
+    })
+
     this.resize()
     this.syncSquads()
+  }
+
+  /** Register the handler invoked when the player clicks an enemy army. */
+  onAttackTarget(fn: (slug: string) => void) {
+    this.onAttack = fn
+  }
+
+  /** Map a mouse event to canvas CSS-pixel coordinates (our draw space). */
+  private toCanvas(e: MouseEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect()
+    const sx = rect.width ? this.w / rect.width : 1
+    const sy = rect.height ? this.h / rect.height : 1
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy }
+  }
+
+  /** Hit-test a point to an army using column proximity (clusters can overlap). */
+  private squadAt(px: number, py: number): Squad | null {
+    const groundY = this.h - 26
+    if (py < groundY - 150 || py > groundY + 24) return null
+    let best: Squad | null = null
+    let bestDist = Infinity
+    for (const s of this.squads) {
+      const d = Math.abs(px - s.x)
+      if (d < bestDist) {
+        bestDist = d
+        best = s
+      }
+    }
+    const slot = this.w / (this.squads.length || 1)
+    return best && bestDist <= slot / 2 ? best : null
   }
 
   start() {
@@ -132,7 +209,7 @@ export class BattleField {
   private resize() {
     const parent = this.canvas.parentElement
     const cssW = parent?.clientWidth ?? 960
-    const cssH = Math.min(360, Math.max(240, Math.round(cssW * 0.32)))
+    const cssH = Math.min(460, Math.max(300, Math.round(cssW * 0.4)))
     this.dpr = Math.min(2, window.devicePixelRatio || 1)
     this.canvas.width = Math.round(cssW * this.dpr)
     this.canvas.height = Math.round(cssH * this.dpr)
@@ -244,36 +321,59 @@ export class BattleField {
     this.impacts.push({ slug: a.target, amount: a.amount, delay: RAID_DUR * 0.9 })
   }
 
-  /** Resolve a landed assault on the defender squad. */
+  /** Resolve a landed assault on the defender squad — make it really shatter. */
   private applyImpact(im: Impact) {
     const s = this.squads.find((sq) => sq.slug === im.slug)
     if (!s) return
-    s.hitFlash = 1
-    // knock a few defenders backward (negative lunge)
-    for (const sol of s.soldiers) {
-      if (Math.random() < 0.5) sol.attack = -1
-    }
     const groundY = this.h - 26
+    s.hitFlash = 1
+    this.shake = Math.min(10, this.shake + 7)
+
+    // knock everyone backward
+    for (const sol of s.soldiers) sol.attack = -1
+
+    // blow a handful of soldiers clean off the line — they fly away as debris
+    const lose = Math.min(s.soldiers.length, 2 + Math.floor(Math.random() * 3))
+    for (let i = 0; i < lose; i++) {
+      const sol = s.soldiers.pop()
+      if (!sol) break
+      const px = s.x + (Math.random() - 0.5) * 60
+      const py = groundY - 24 - Math.random() * 30
+      const dir = px < s.x ? -1 : 1
+      // chunky body + head + helmet debris
+      this.spawnChunk(px, py, 70 * dir + (Math.random() - 0.5) * 60, -120 - Math.random() * 80, s.color, 6)
+      this.spawnChunk(px, py - 6, 50 * dir, -150 - Math.random() * 60, '#f2c79a', 4)
+      this.spawnChunk(px, py - 10, 40 * dir, -130, shade(s.color, -0.45), 4)
+    }
+
+    // shockwave ring + spray
+    this.rings.push({ x: s.x, y: groundY - 24, r: 6, life: 0.5, color: '#ff6b8a' })
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2
+      const sp = 50 + Math.random() * 140
+      this.particles.push({
+        x: s.x,
+        y: groundY - 36,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 60,
+        life: 0.5 + Math.random() * 0.5,
+        color: i % 3 === 0 ? '#ffffff' : i % 3 === 1 ? '#ff6b8a' : s.color,
+        size: 3 + Math.floor(Math.random() * 2),
+      })
+    }
+
     this.floats.push({
       x: s.x,
-      y: groundY - 96,
-      vy: -26,
-      life: 1.3,
+      y: groundY - 100,
+      vy: -30,
+      life: 1.4,
       text: `-${im.amount}`,
       color: '#ff6b8a',
     })
-    for (let i = 0; i < 16; i++) {
-      const a = Math.random() * Math.PI * 2
-      const sp = 40 + Math.random() * 90
-      this.particles.push({
-        x: s.x,
-        y: groundY - 40,
-        vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp - 40,
-        life: 0.5 + Math.random() * 0.4,
-        color: i % 2 ? '#ff6b8a' : '#ffffff',
-      })
-    }
+  }
+
+  private spawnChunk(x: number, y: number, vx: number, vy: number, color: string, size: number) {
+    this.particles.push({ x, y, vx, vy, life: 0.7 + Math.random() * 0.5, color, size })
   }
 
   private update(dt: number) {
@@ -333,6 +433,10 @@ export class BattleField {
       p.y += p.vy * dt
       p.vy += 180 * dt
     }
+
+    this.shake = Math.max(0, this.shake - dt * 26)
+    this.rings = this.rings.filter((r) => (r.life -= dt) > 0)
+    for (const r of this.rings) r.r += dt * 260
   }
 
   private draw(time: number) {
@@ -340,11 +444,30 @@ export class BattleField {
     ctx.save()
     ctx.scale(this.dpr, this.dpr)
     ctx.imageSmoothingEnabled = false
+    // screen shake on heavy hits
+    if (this.shake > 0.2) {
+      const k = this.shake
+      ctx.translate(
+        Math.round(Math.sin(time * 91) * k),
+        Math.round(Math.cos(time * 73) * k),
+      )
+    }
     this.drawBackground(time)
 
     const groundY = this.h - 26
     // draw squads sorted so leftmost paints first (no real depth needed)
     for (const s of this.squads) this.drawSquad(s, groundY)
+
+    // shockwave rings from impacts
+    for (const r of this.rings) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, r.life * 2))
+      ctx.strokeStyle = r.color
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
 
     // charging raiders ride above the armies
     for (const r of this.raiders) {
@@ -355,7 +478,8 @@ export class BattleField {
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2))
       ctx.fillStyle = p.color
-      ctx.fillRect(Math.round(p.x), Math.round(p.y), 3, 3)
+      const sz = p.size ?? 3
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), sz, sz)
     }
     ctx.globalAlpha = 1
 
@@ -429,6 +553,28 @@ export class BattleField {
       ctx.fillStyle = '#ff3b5c'
       ctx.fillRect(Math.round(s.x - clusterW / 2 - 4), groundY - 80, clusterW + 8, 86)
       ctx.globalAlpha = 1
+    }
+
+    // selection / targeting markers
+    const champion = this.store.getChampion()
+    const boxX = Math.round(s.x - clusterW / 2 - 6)
+    const boxW = clusterW + 12
+    if (s.slug === champion) {
+      // your army — steady gold frame so you can find it on the field
+      ctx.strokeStyle = '#ffd34d'
+      ctx.lineWidth = 2
+      ctx.globalAlpha = 0.9
+      ctx.strokeRect(boxX, groundY - 86, boxW, 92)
+      ctx.globalAlpha = 1
+    } else if (s.slug === this.hovered) {
+      // an enemy under the cursor — red "click to attack" frame
+      ctx.strokeStyle = '#ff6b8a'
+      ctx.lineWidth = 2
+      ctx.strokeRect(boxX, groundY - 86, boxW, 92)
+      ctx.font = '8px "Press Start 2P", monospace'
+      ctx.textAlign = 'center'
+      ctx.fillStyle = '#ff6b8a'
+      ctx.fillText('공격!', Math.round(s.x), groundY - 92)
     }
 
     // banner — anchored just above this squad's army so flag and troops read as one unit

@@ -8,7 +8,7 @@ import { SupabaseBackend } from './backend/supabase'
 import { mountLeaderboard } from './ui/leaderboard'
 import { mountVotePanel } from './ui/votePanel'
 import { mountLiveFeed } from './ui/liveFeed'
-import { mountCombatPanel } from './ui/combatPanel'
+import { mountCombatHud } from './ui/combatPanel'
 import { mountChatPanel } from './ui/chatPanel'
 import { el } from './ui/dom'
 
@@ -20,10 +20,10 @@ async function boot() {
   const modeBadge = el('span', { class: 'mode-badge', text: '...' })
   const canvas = el('canvas', { class: 'battle-canvas' })
   const battleWrap = el('section', { class: 'battlefield' }, [canvas])
-  const colLeft = el('div', { class: 'col col-left' })
-  const colMid = el('div', { class: 'col col-mid' })
-  const colRight = el('div', { class: 'col col-right' })
-  const colCombat = el('div', { class: 'col col-combat' })
+  const hud = el('section', { class: 'hud-bar' })
+  const colVote = el('div', { class: 'col col-vote' })
+  const colStand = el('div', { class: 'col col-stand' })
+  const colFeed = el('div', { class: 'col col-feed' })
   const colChat = el('div', { class: 'col col-chat' })
 
   app.append(
@@ -34,12 +34,12 @@ async function boot() {
       ]),
       el('p', {
         class: 'tagline',
-        text: '세상에서 가장 위대한 프로그래밍 언어는? 깡통에 한 표를 던지면, 도트 군대가 전쟁을 시작한다.',
+        text: '내 언어에 투표해 군대를 키우고, 전장에서 적 진영을 클릭해 박살내라. ⚔',
       }),
     ]),
     battleWrap,
-    el('main', { class: 'grid' }, [colLeft, colMid, colRight]),
-    el('section', { class: 'arena-row' }, [colCombat, colChat]),
+    hud,
+    el('main', { class: 'grid' }, [colVote, colStand, colFeed, colChat]),
     el('footer', { class: 'site-footer' }, [
       el('p', {
         text: '스페인 길거리에서 여행자들이 "가장 위대한 언어"를 묻는 깡통 투표로 여비를 벌던 일화에서 출발했습니다.',
@@ -75,13 +75,15 @@ async function boot() {
   })
 
   // --- mount UI -------------------------------------------------------------
-  mountLeaderboard(colLeft, store)
-  mountVotePanel(colMid, store, backend)
-  mountLiveFeed(colRight, store)
-  mountCombatPanel(colCombat, store, backend)
+  const combat = mountCombatHud(hud, store, backend)
+  mountVotePanel(colVote, store, backend)
+  mountLeaderboard(colStand, store)
+  mountLiveFeed(colFeed, store)
   mountChatPanel(colChat, store, backend)
 
   const battle = new BattleField(canvas, store)
+  // click an enemy army on the field → attack it
+  battle.onAttackTarget((slug) => combat.tryAttack(slug))
   battle.start()
 }
 
