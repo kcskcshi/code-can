@@ -98,6 +98,11 @@ body {
   display: block;
   width: 100%;
   image-rendering: pixelated;
+  /* press-and-hold to attack: no callout / text-selection / double-tap zoom */
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 /* CRT scanline + vignette overlay */
 .battlefield::after {

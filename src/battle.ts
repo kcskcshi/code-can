@@ -134,6 +134,7 @@ export class BattleField {
     this.unsub.push(this.store.onAssault((a) => this.onAssault(a)))
 
     // Hover highlights a target; press-and-hold an enemy planet to auto-fire.
+    // Works for both mouse and touch.
     const onMove = (e: MouseEvent) => {
       const { x, y } = this.toCanvas(e)
       const b = this.bodyAt(x, y)
@@ -145,31 +146,41 @@ export class BattleField {
           ? 'not-allowed'
           : 'crosshair'
     }
-    const onDown = (e: MouseEvent) => {
-      const { x, y } = this.toCanvas(e)
-      const b = this.bodyAt(x, y)
-      if (!b || b.slug === this.store.getChampion()) return
-      // fire once immediately, then keep firing while held
-      this.firing = b.slug
-      this.fireAccum = 0
-      this.localHit(b.slug)
-      this.onAttack?.(b.slug)
-    }
-    const stop = () => {
-      this.firing = null
-    }
-    this.canvas.addEventListener('mousemove', onMove)
-    this.canvas.addEventListener('mouseleave', () => {
+    const onMouseDown = (e: MouseEvent) => this.beginFire(this.toCanvas(e))
+    const onMouseLeave = () => {
       this.hovered = null
       this.canvas.style.cursor = 'default'
-      stop()
-    })
-    this.canvas.addEventListener('mousedown', onDown)
-    window.addEventListener('mouseup', stop)
+      this.stopFire()
+    }
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (!t) return
+      // Only swallow the touch (and its page-scroll) when it lands on an enemy
+      // planet — taps on empty space still scroll the page normally.
+      if (this.beginFire(this.toCanvas(t))) {
+        this.hovered = this.firing
+        e.preventDefault()
+      }
+    }
+    const onTouchEnd = () => {
+      this.hovered = null
+      this.stopFire()
+    }
+    this.canvas.addEventListener('mousemove', onMove)
+    this.canvas.addEventListener('mouseleave', onMouseLeave)
+    this.canvas.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mouseup', this.stopFire)
+    this.canvas.addEventListener('touchstart', onTouchStart, { passive: false })
+    this.canvas.addEventListener('touchend', onTouchEnd)
+    this.canvas.addEventListener('touchcancel', onTouchEnd)
     this.unsub.push(() => {
       this.canvas.removeEventListener('mousemove', onMove)
-      this.canvas.removeEventListener('mousedown', onDown)
-      window.removeEventListener('mouseup', stop)
+      this.canvas.removeEventListener('mouseleave', onMouseLeave)
+      this.canvas.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mouseup', this.stopFire)
+      this.canvas.removeEventListener('touchstart', onTouchStart)
+      this.canvas.removeEventListener('touchend', onTouchEnd)
+      this.canvas.removeEventListener('touchcancel', onTouchEnd)
     })
 
     this.resize()
@@ -181,7 +192,24 @@ export class BattleField {
     this.onAttack = fn
   }
 
-  private toCanvas(e: MouseEvent): { x: number; y: number } {
+  /** Start auto-firing at the planet under a pointer. Returns false if it was
+   * empty space or your own planet. Fires one tick immediately. */
+  private beginFire(pt: { x: number; y: number }): boolean {
+    const b = this.bodyAt(pt.x, pt.y)
+    if (!b || b.slug === this.store.getChampion()) return false
+    this.firing = b.slug
+    this.fireAccum = 0
+    this.localHit(b.slug)
+    this.onAttack?.(b.slug)
+    return true
+  }
+
+  // arrow so it can be used directly as an event listener and unsubscribed
+  private stopFire = () => {
+    this.firing = null
+  }
+
+  private toCanvas(e: { clientX: number; clientY: number }): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect()
     const sx = rect.width ? this.w / rect.width : 1
     const sy = rect.height ? this.h / rect.height : 1
